@@ -1,0 +1,19 @@
+[package]
+name = "quickdraw-platform"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+quickdraw-core = { path = "../quickdraw-core" }
+tokio          = { workspace = true }
+anyhow         = { workspace = true }
+thiserror      = { workspace = true }
+tracing        = { workspace = true }
+rdev           = { workspace = true, optional = true }
+arboard        = { version = "3", features = ["wayland-data-control"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+xcap = { workspace = true }
+
+[features]
+hotkey = ["rdev"]

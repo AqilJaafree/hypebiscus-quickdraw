@@ -1,0 +1,25 @@
+[package]
+name = "quickdraw-detection"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+quickdraw-core = { path = "../quickdraw-core" }
+tokio          = { workspace = true }
+regex          = { workspace = true }
+once_cell      = { workspace = true }
+bs58           = { workspace = true }
+solana-sdk     = { workspace = true }
+anyhow         = { workspace = true }
+thiserror      = { workspace = true }
+tracing        = { workspace = true }
+serde          = { workspace = true }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+atspi          = { version = "0.19", optional = true }
+leptess        = { version = "0.14", optional = true }
+xcap           = { workspace = true }
+
+[features]
+accessibility = ["atspi"]
+ocr           = ["leptess"]

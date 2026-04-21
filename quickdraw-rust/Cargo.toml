@@ -1,0 +1,120 @@
+[workspace]
+members = [
+    ".",
+    "crates/quickdraw-core",
+    "crates/quickdraw-infra",
+    "crates/quickdraw-ai",
+    "crates/quickdraw-defi",
+    "crates/quickdraw-detection",
+    "crates/quickdraw-platform",
+    "crates/quickdraw-ui",
+    "crates/quickdraw-host",
+]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/wanaqilre/quickdraw"
+
+[workspace.dependencies]
+# Async
+tokio            = { version = "1.36", features = ["full"] }
+futures          = "0.3"
+async-trait      = "0.1"
+pin-project-lite = "0.2"
+
+# GUI
+eframe           = { version = "0.27", features = ["default_fonts"] }
+egui             = "0.27"
+egui_plot        = "0.27"
+
+# Tray + hotkey
+tray-icon        = "0.14"
+rdev             = "0.5"
+
+# Serialization
+serde            = { version = "1", features = ["derive"] }
+serde_json       = "1"
+toml             = "0.8"
+
+# Networking
+reqwest          = { version = "0.12", features = ["json", "stream", "rustls-tls"] }
+tokio-tungstenite = { version = "0.21", features = ["rustls-tls-native-roots"] }
+
+# Crypto / signing
+hmac             = "0.12"
+sha2             = "0.10"
+hex              = "0.4"
+base64           = "0.22"
+zeroize          = { version = "1", features = ["derive"] }
+
+# Solana — Agave 2.1.x (compatible with Rust 1.92, zeroize 1.x)
+solana-sdk       = "=2.1.0"
+solana-client    = "=2.1.0"
+bs58             = "0.5"
+
+# AI / structured output
+schemars         = "0.8"
+backon           = "0.4"
+
+# Audio
+cpal             = "0.15"
+rubato           = "0.15"
+rodio            = { version = "0.17", features = ["symphonia-mp3"] }
+
+# Screen capture / OCR
+xcap             = "0.2"
+image            = "0.25"
+
+# Utils
+anyhow           = "1"
+thiserror        = "1"
+tracing          = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+once_cell        = "1"
+regex            = "1"
+uuid             = { version = "1", features = ["v4", "serde"] }
+directories      = "5"
+open             = "5"
+qrcode           = "0.14"
+
+[package]
+name = "quickdraw"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "quickdraw"
+path = "src/main.rs"
+
+[dependencies]
+quickdraw-core      = { path = "crates/quickdraw-core" }
+quickdraw-infra     = { path = "crates/quickdraw-infra" }
+quickdraw-ai        = { path = "crates/quickdraw-ai" }
+quickdraw-defi      = { path = "crates/quickdraw-defi" }
+quickdraw-detection = { path = "crates/quickdraw-detection" }
+quickdraw-platform  = { path = "crates/quickdraw-platform" }
+quickdraw-ui        = { path = "crates/quickdraw-ui" }
+# Directly used in main.rs for detection pipeline wiring
+tokio               = { workspace = true }
+eframe              = { workspace = true }
+egui                = { workspace = true }
+reqwest             = { workspace = true }
+serde               = { workspace = true }
+serde_json          = { workspace = true }
+solana-sdk          = { workspace = true }
+tracing             = { workspace = true }
+tracing-subscriber  = { workspace = true }
+anyhow              = { workspace = true }
+
+[profile.dev]
+opt-level = 1
+
+[profile.release]
+lto           = true
+codegen-units = 1
+panic         = "abort"
+strip         = true
+opt-level     = 3

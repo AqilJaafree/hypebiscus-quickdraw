@@ -1,0 +1,16 @@
+name = "quickdraw-worker"
+main = "src/index.ts"
+compatibility_date = "2024-01-01"
+compatibility_flags = ["nodejs_compat"]
+
+[vars]
+# Set these via `wrangler secret put` — never commit real values
+# ANTHROPIC_API_KEY = ""
+# APP_SECRET = ""        # shared with the Rust binary for HMAC verification
+# HELIUS_API_KEY = ""
+# ASSEMBLYAI_API_KEY = ""
+
+[[kv_namespaces]]
+binding = "RATE_LIMIT_KV"
+id = "placeholder_replace_with_real_id"
+preview_id = "placeholder_replace_with_real_id"
