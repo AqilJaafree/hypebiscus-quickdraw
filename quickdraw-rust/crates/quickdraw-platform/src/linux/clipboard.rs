@@ -59,7 +59,12 @@ fn spawn_arboard_watcher(tx: tokio::sync::mpsc::Sender<String>, primary: bool) {
     info!("{label} watcher started (arboard, 500ms poll)");
 
     std::thread::spawn(move || {
-        let mut last: Option<String> = None;
+        // Pre-seed with current content — prevents firing on whatever was already in clipboard
+        let mut last: Option<String> = get_text(&mut clipboard, primary)
+            .ok()
+            .map(|t| t.trim().to_owned())
+            .filter(|t| !t.is_empty());
+
         loop {
             std::thread::sleep(Duration::from_millis(500));
             if let Ok(text) = get_text(&mut clipboard, primary) {

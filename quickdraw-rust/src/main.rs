@@ -20,6 +20,14 @@ use quickdraw_ai::{
 use solana_sdk::pubkey::Pubkey;
 
 fn main() -> Result<()> {
+    // Load .env from the project root (one level up from quickdraw-rust/)
+    let env_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .map(|p| p.join(".env"));
+    if let Some(path) = env_path {
+        let _ = dotenvy::from_path(path);
+    }
+
     tracing_subscriber::fmt()
         .with_env_filter(
             EnvFilter::from_default_env()
@@ -27,8 +35,9 @@ fn main() -> Result<()> {
         )
         .init();
 
-    let demo_mode = std::env::args().any(|a| a == "--demo");
-    info!("Quickdraw starting{}", if demo_mode { " [DEMO]" } else { "" });
+    let demo_mode     = std::env::args().any(|a| a == "--demo");
+    let settings_mode = std::env::args().any(|a| a == "--settings");
+    info!("Quickdraw starting{}{}", if demo_mode { " [DEMO]" } else { "" }, if settings_mode { " [SETTINGS]" } else { "" });
 
     // Remove WAYLAND_DISPLAY so winit uses X11 (XWayland) for rendering. Wayland rendering
     // on GNOME Mutter causes screen-wide flicker due to frame-timing conflicts.
@@ -44,12 +53,11 @@ fn main() -> Result<()> {
         .enable_all()
         .build()?;
 
-    // Shared snapshot — UI reads this, fetch tasks write directly to it
-    let initial = if demo_mode {
-        quickdraw_ui::app::demo_snapshot()
-    } else {
-        AppSnapshot::default()
-    };
+    // Shared snapshot — UI reads this, fetch tasks write directly to it.
+    // Use AppState::default().snapshot() so detection_enabled=true from the start.
+    let mut initial_state = AppState::default();
+    if settings_mode { initial_state.settings_visible = true; }
+    let initial = if demo_mode { quickdraw_ui::app::demo_snapshot() } else { initial_state.snapshot() };
     let snapshot: Arc<RwLock<AppSnapshot>> = Arc::new(RwLock::new(initial));
 
     // Single command channel: UI → engine
@@ -112,17 +120,17 @@ fn main() -> Result<()> {
     // ── Engine ───────────────────────────────────────────────────────────────
     let snap_engine   = snapshot.clone();
     let repaint_engine = repaint_tx.clone();
-    rt.spawn(engine_task(cmd_rx, snap_engine, repaint_engine));
+    rt.spawn(engine_task(cmd_rx, snap_engine, repaint_engine, settings_mode));
 
     // ── eframe ───────────────────────────────────────────────────────────────
     let native_opts = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title("Quickdraw")
-            .with_inner_size([260.0, 100.0])
+            .with_inner_size([quickdraw_ui::design::Tokens::PANEL_WIDTH, quickdraw_ui::design::Tokens::PANEL_HEIGHT])
             .with_resizable(false)
             .with_decorations(false)
-            .with_visible(demo_mode)  // hidden until first detection; visible immediately in demo
-            .with_position(if demo_mode { [200.0, 200.0] } else { [0.0, 0.0] }),
+            .with_visible(true)
+            .with_window_level(egui::WindowLevel::AlwaysOnTop),
         ..Default::default()
     };
 
@@ -157,20 +165,28 @@ async fn engine_task(
     mut cmd_rx: mpsc::Receiver<Command>,
     snapshot: Arc<RwLock<AppSnapshot>>,
     repaint_tx: std::sync::mpsc::Sender<()>,
+    settings_mode: bool,
 ) {
     println!("ENGINE: started");
 
     let mut state = AppState::default();
+    if settings_mode { state.settings_visible = true; }
     let http = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(8))
+        .timeout(std::time::Duration::from_secs(5))
         .build()
         .expect("http client");
 
-    let worker_url = std::env::var("WORKER_URL").unwrap_or_default();
-    let haiku = if worker_url.is_empty() { {
+    let worker_url  = std::env::var("WORKER_URL").unwrap_or_default();
+    let app_secret  = std::env::var("APP_SECRET").unwrap_or_default();
+    let haiku = if worker_url.is_empty() {
         warn!("WORKER_URL not set — AI narration disabled");
         None::<HaikuProvider>
-    } } else { Some(HaikuProvider::new(&worker_url)) };
+    } else if app_secret.is_empty() {
+        warn!("APP_SECRET not set — AI narration disabled (worker requires HMAC auth)");
+        None::<HaikuProvider>
+    } else {
+        Some(HaikuProvider::new(&worker_url, &app_secret))
+    };
     let haiku = Arc::new(haiku);
 
     while let Some(cmd) = cmd_rx.recv().await {
@@ -210,6 +226,42 @@ async fn engine_task(
     println!("ENGINE: cmd_rx closed — exiting");
 }
 
+fn default_safety_report() -> quickdraw_core::types::SafetyReport {
+    quickdraw_core::types::SafetyReport {
+        score: 0,
+        ticker: None,
+        jupiter_listed: false,
+        mint_authority_disabled: false,
+        freeze_authority_disabled: false,
+        top_holder_pct: 0.0,
+        liquidity_usd: 0.0,
+        rugcheck_ok: false,
+        summary: "Safety check unavailable".into(),
+    }
+}
+
+/// Helper: update snapshot only if the given address is still the active token.
+/// Returns true if update was applied, false if token changed.
+fn update_if_current<F>(
+    snapshot: &Arc<RwLock<AppSnapshot>>,
+    address: Pubkey,
+    repaint: &std::sync::mpsc::Sender<()>,
+    update_fn: F,
+) -> bool
+where
+    F: FnOnce(&mut AppSnapshot),
+{
+    let mut s = snapshot.write().unwrap();
+    if s.token_address == Some(address) {
+        update_fn(&mut s);
+        s.version += 1;
+        let _ = repaint.send(());
+        true
+    } else {
+        false
+    }
+}
+
 fn dispatch_effect(
     effect: SideEffect,
     snapshot: Arc<RwLock<AppSnapshot>>,
@@ -227,12 +279,9 @@ fn dispatch_effect(
                     warn!("price fetch failed: {e}");
                     TokenPrice { price_usd: 0.0, change_24h_pct: 0.0, volume_24h_usd: 0.0, market_cap_usd: None }
                 });
-                {
-                    let mut s = snap.write().unwrap();
+                update_if_current(&snap, address, &rep, |s| {
                     s.token_price = Some(price);
-                    s.version += 1;
-                }
-                let _ = rep.send(());
+                });
             });
         }
 
@@ -240,34 +289,45 @@ fn dispatch_effect(
             let snap   = snapshot.clone();
             let rep    = repaint_tx.clone();
             let haiku  = haiku.clone();
-            let snap_r = snapshot.clone();
             tokio::spawn(async move {
                 let Some(ref provider) = *haiku else { return };
 
-                // Build token context from current snapshot
+                // Wait up to 600ms for price fetch to complete before building context
+                let mut waited = 0u64;
+                while waited < 600 {
+                    let has_price = snap.read().unwrap().token_price.is_some();
+                    if has_price { break; }
+                    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                    waited += 100;
+                }
+
+                // Bail if a newer token was detected while we waited
+                if snap.read().unwrap().token_address != Some(address) { return; }
+
                 let token_ctx = {
-                    let s = snap_r.read().unwrap();
+                    let s = snap.read().unwrap();
+                    let ticker = s.token_ticker.as_deref().unwrap_or("unknown");
                     let price_str = s.token_price.as_ref().map(|p| format!(
-                        "${:.6} ({:+.2}% 24h, vol ${:.0})",
-                        p.price_usd, p.change_24h_pct, p.volume_24h_usd
+                        "${:.6} ({:+.2}% 24h, vol ${:.0}, mcap {})",
+                        p.price_usd, p.change_24h_pct, p.volume_24h_usd,
+                        p.market_cap_usd.map(|m| format!("${:.0}", m)).unwrap_or_else(|| "unknown".into())
                     )).unwrap_or_else(|| "price unavailable".into());
                     let safety_str = s.safety_report.as_ref().map(|r| format!(
-                        "organic score {}/100 — {}", r.score, r.summary
-                    )).unwrap_or_else(|| "safety data unavailable".into());
-                    format!("Token: {address}\nPrice: {price_str}\nSafety: {safety_str}")
+                        "score {}/100, jupiter={}, liquidity=${:.0}, {}",
+                        r.score, r.jupiter_listed, r.liquidity_usd, r.summary
+                    )).unwrap_or_else(|| "safety unavailable".into());
+                    format!("Token: {ticker} ({address})\nPrice: {price_str}\nSafety: {safety_str}")
                 };
 
                 let req = AIRequest {
                     task: AITask::TokenNarration,
                     system_static: "You are a concise DeFi analyst for Solana tokens. \
-                        Give a 2-sentence assessment. Be direct: mention the organic score, \
-                        key risks or strengths, and whether it looks worth trading. \
-                        No disclaimers, no markdown.".into(),
+                        Reply with exactly 2 bullet points using • as the bullet character. \
+                        Each bullet max 12 words. First bullet: safety + liquidity verdict. \
+                        Second bullet: price action + trade signal. \
+                        No disclaimers, no markdown, no headers.".into(),
                     market_pulse: None,
-                    messages: vec![Message {
-                        role: "user".into(),
-                        content: token_ctx,
-                    }],
+                    messages: vec![Message { role: "user".into(), content: token_ctx }],
                     images: vec![],
                     max_tokens: AITask::TokenNarration.max_tokens(),
                     temperature: 0.3,
@@ -275,11 +335,10 @@ fn dispatch_effect(
 
                 match provider.complete(req).await {
                     Ok(resp) => {
-                        let mut s = snap.write().unwrap();
-                        s.ai_narration = Some(resp.text);
-                        s.ai_streaming = false;
-                        s.version += 1;
-                        let _ = rep.send(());
+                        update_if_current(&snap, address, &rep, |s| {
+                            s.ai_narration = Some(resp.text);
+                            s.ai_streaming = false;
+                        });
                     }
                     Err(e) => warn!("AI narration failed: {e}"),
                 }
@@ -287,34 +346,35 @@ fn dispatch_effect(
         }
 
         SideEffect::FetchSafetyScore { address } => {
-            let http = http.clone();
-            let snap = snapshot.clone();
-            let rep  = repaint_tx.clone();
+            let http  = http.clone();
+            let snap  = snapshot.clone();
+            let rep   = repaint_tx.clone();
+            let haiku = haiku.clone();
             tokio::spawn(async move {
                 let report = fetch_jupiter_safety(&http, address).await.unwrap_or_else(|e| {
                     warn!("safety fetch failed: {e}");
-                    quickdraw_core::types::SafetyReport {
-                        score: 0,
-                        ticker: None,
-                        jupiter_listed: false,
-                        mint_authority_disabled: false,
-                        freeze_authority_disabled: false,
-                        top_holder_pct: 0.0,
-                        liquidity_usd: 0.0,
-                        rugcheck_ok: false,
-                        summary: "Safety check unavailable".into(),
-                    }
+                    default_safety_report()
                 });
-                {
-                    let mut s = snap.write().unwrap();
+
+                let updated = update_if_current(&snap, address, &rep, |s| {
                     if let Some(tk) = report.ticker.clone() {
                         s.token_ticker = Some(tk.clone());
                         s.last_seen_ticker = Some(tk);
                     }
                     s.safety_report = Some(report);
-                    s.version += 1;
-                }
-                let _ = rep.send(());
+                    s.ai_streaming = haiku.is_some();
+                });
+
+                if !updated { return; } // Token changed — discard
+
+                // Fire AI narration now — safety ready, price likely ready too
+                dispatch_effect(
+                    SideEffect::DispatchAiNarration { address },
+                    snap,
+                    rep,
+                    &http,
+                    haiku,
+                );
             });
         }
 

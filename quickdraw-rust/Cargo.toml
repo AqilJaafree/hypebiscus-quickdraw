@@ -79,6 +79,7 @@ uuid             = { version = "1", features = ["v4", "serde"] }
 directories      = "5"
 open             = "5"
 qrcode           = "0.14"
+dotenvy          = "0.15"
 
 [package]
 name = "quickdraw"
@@ -107,6 +108,7 @@ serde_json          = { workspace = true }
 solana-sdk          = { workspace = true }
 tracing             = { workspace = true }
 tracing-subscriber  = { workspace = true }
+dotenvy             = { workspace = true }
 anyhow              = { workspace = true }
 
 [profile.dev]
