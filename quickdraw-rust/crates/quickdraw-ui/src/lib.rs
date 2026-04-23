@@ -1,6 +1,8 @@
 pub mod app;
 pub mod design;
+pub mod header;
 pub mod overlay;
+pub mod panel;
 pub mod token_card;
 pub mod swap_ui;
 pub mod chart;

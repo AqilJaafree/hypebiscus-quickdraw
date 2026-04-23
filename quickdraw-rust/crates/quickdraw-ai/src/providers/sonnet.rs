@@ -13,16 +13,18 @@ const MODEL: &str = "claude-sonnet-4-6";
 pub struct SonnetProvider {
     client: Client,
     worker_url: String,
+    app_secret: String,
 }
 
 impl SonnetProvider {
-    pub fn new(worker_url: impl Into<String>) -> Self {
+    pub fn new(worker_url: impl Into<String>, app_secret: impl Into<String>) -> Self {
         Self {
             client: Client::builder()
                 .timeout(Duration::from_secs(60))
                 .build()
                 .expect("reqwest client"),
             worker_url: worker_url.into(),
+            app_secret: app_secret.into(),
         }
     }
 }
@@ -38,14 +40,14 @@ impl AIProvider for SonnetProvider {
     async fn complete(&self, req: AIRequest) -> Result<AIResponse> {
         // Sonnet uses /ai/deep on the Worker — same protocol as Haiku
         // Delegate to Haiku's implementation with a different endpoint
-        let haiku = HaikuProvider::new(self.worker_url.clone());
+        let haiku = HaikuProvider::new(self.worker_url.clone(), self.app_secret.clone());
         let mut resp = haiku.complete(req).await?;
         resp.provider_used = MODEL.into();
         Ok(resp)
     }
 
     async fn stream(&self, req: AIRequest) -> Result<TokenStream> {
-        let haiku = HaikuProvider::new(self.worker_url.clone());
+        let haiku = HaikuProvider::new(self.worker_url.clone(), self.app_secret.clone());
         haiku.stream(req).await
     }
 

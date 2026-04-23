@@ -21,7 +21,7 @@ use super::bridge::WalletBridge;
 
 // WalletConnect v2 relay (public relay — no auth needed for pairing)
 const WC_RELAY: &str = "wss://relay.walletconnect.com";
-const WC_PROJECT_ID: &str = "quickdraw_hackathon"; // replace with real project ID
+const WC_PROJECT_ID: &str = "REOWN_PROJECT_ID_PLACEHOLDER";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum WalletConnectState {
@@ -72,9 +72,12 @@ impl WalletConnectBridge {
 
         // WalletConnect v2 URI format:
         // wc:<topic>@2?relay-protocol=irn&symKey=<hex>
+        let project_id = std::env::var("REOWN_PROJECT_ID")
+            .unwrap_or_else(|_| WC_PROJECT_ID.to_string());
+
         let uri = format!(
             "wc:{}@2?relay-protocol=irn&symKey={}&projectId={}",
-            topic, sym_key_hex, WC_PROJECT_ID
+            topic, sym_key_hex, project_id
         );
 
         *self.state.write().await = WalletConnectState::AwaitingApproval { uri: uri.clone() };

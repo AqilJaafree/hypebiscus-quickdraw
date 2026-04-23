@@ -10,6 +10,11 @@
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20240208.0",
     "typescript": "^5.3.3",
+    "vite": "^8.0.10",
     "wrangler": "^3.28.2"
+  },
+  "dependencies": {
+    "@reown/appkit": "^1.8.19",
+    "@reown/appkit-adapter-solana": "^1.8.19"
   }
 }

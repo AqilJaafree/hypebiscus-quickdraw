@@ -29,7 +29,7 @@ pub fn spawn_selection_watcher() -> tokio::sync::mpsc::Receiver<(String, Point)>
     // Attach cursor position and forward
     std::thread::spawn(move || {
         while let Some(text) = rx_inner.blocking_recv() {
-            let pos = read_cursor_position().unwrap_or(Point { x: 5.0, y: 5.0 });
+            let pos = cursor_position().unwrap_or(Point { x: 5.0, y: 5.0 });
             if tx_outer.blocking_send((text, pos)).is_err() {
                 break;
             }
@@ -59,7 +59,12 @@ fn spawn_arboard_watcher(tx: tokio::sync::mpsc::Sender<String>, primary: bool) {
     info!("{label} watcher started (arboard, 500ms poll)");
 
     std::thread::spawn(move || {
-        let mut last: Option<String> = None;
+        // Pre-seed with current content — prevents firing on whatever was already in clipboard
+        let mut last: Option<String> = get_text(&mut clipboard, primary)
+            .ok()
+            .map(|t| t.trim().to_owned())
+            .filter(|t| !t.is_empty());
+
         loop {
             std::thread::sleep(Duration::from_millis(500));
             if let Ok(text) = get_text(&mut clipboard, primary) {
@@ -94,7 +99,7 @@ fn get_text(clipboard: &mut arboard::Clipboard, primary: bool) -> anyhow::Result
 // Cursor position (X11 only via xdotool)
 // ─────────────────────────────────────────────────────────────────────────────
 
-fn read_cursor_position() -> Option<Point> {
+pub fn cursor_position() -> Option<Point> {
     let out = std::process::Command::new("xdotool")
         .arg("getmouselocation")
         .output()

@@ -101,6 +101,7 @@ impl SafetyAggregator {
             top_holder_pct,
             liquidity_usd,
             rugcheck_ok,
+            organic_score: 0.0,
         };
 
         let score = calculate_safety_score(&input);
@@ -113,6 +114,7 @@ impl SafetyAggregator {
 
         Ok(SafetyReport {
             score,
+            ticker: None,
             mint_authority_disabled: mint_disabled,
             freeze_authority_disabled: freeze_disabled,
             jupiter_listed,

@@ -13,6 +13,8 @@ pub enum Command {
     StartListening,
     StopListening,
     SetAiMode(AiMode),
+    ToggleSettings,
+    ToggleDetection,
     ConnectWallet,
     DisconnectWallet,
     WalletConnected(Pubkey),

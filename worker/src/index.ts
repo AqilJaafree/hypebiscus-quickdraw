@@ -26,6 +26,7 @@ export interface Env {
   APP_SECRET: string;
   HELIUS_API_KEY: string;
   ASSEMBLYAI_API_KEY: string;
+  REOWN_PROJECT_ID: string;
   RATE_LIMIT_KV: KVNamespace;
 }
 
@@ -239,6 +240,98 @@ async function handleHeliusToken(url: URL, env: Env): Promise<Response> {
   return json(data, upstream.status);
 }
 
+// ─────────────────────────── Reown auth page ─────────────────────────────────
+
+function authPage(callbackUrl: string, projectId: string): string {
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Quickdraw — Connect Wallet</title>
+  <script src="https://cdn.jsdelivr.net/npm/@walletconnect/modal@2/dist/index.umd.js"><\/script>
+  <style>
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{background:#111;color:#f5f0e8;font-family:monospace;display:flex;align-items:center;justify-content:center;min-height:100vh}
+    .card{background:#1a1a1a;border:2px solid #000;box-shadow:4px 4px 0 #000;padding:32px;width:380px}
+    h1{color:#f5e642;font-size:15px;letter-spacing:2px;margin-bottom:8px}
+    .sub{color:#555;font-size:11px;margin-bottom:24px}
+    input{width:100%;background:#222;border:1.5px solid #333;color:#fff;padding:10px 12px;font-family:monospace;font-size:12px;outline:none;margin-bottom:8px}
+    input:focus{border-color:#f5e642}
+    button{width:100%;background:#f5e642;color:#000;border:1.5px solid #000;padding:11px;font-family:monospace;font-size:12px;font-weight:700;cursor:pointer;margin-bottom:8px;letter-spacing:1px}
+    button:hover{background:#ffe000}
+    button.sec{background:#222;color:#888;border-color:#333}
+    button.sec:hover{background:#2a2a2a;color:#fff}
+    .status{font-size:11px;color:#8bf542;margin-top:12px;min-height:16px}
+    .err{font-size:11px;color:#f54242;margin-top:8px}
+    .divider{text-align:center;color:#333;font-size:11px;margin:12px 0}
+  </style>
+</head>
+<body>
+<div class="card">
+  <h1>QUICKDRAW</h1>
+  <p class="sub">Sign in to track your portfolio and enable swaps.</p>
+
+  <input type="email" id="email" placeholder="Enter your email" autocomplete="email" />
+  <button onclick="sendMagicLink()">Send Magic Link</button>
+
+  <div class="divider">— or connect wallet —</div>
+
+  <button class="sec" onclick="openWcModal()">WalletConnect (QR)</button>
+
+  <div class="status" id="status"></div>
+  <div class="err" id="err"></div>
+</div>
+
+<script>
+  const CALLBACK = '${callbackUrl}';
+  const PROJECT_ID = '${projectId}';
+
+  function setStatus(msg) { document.getElementById('status').textContent = msg; }
+  function setErr(msg)    { document.getElementById('err').textContent = msg; }
+
+  function sendCallback(address) {
+    setStatus('✓ Connected: ' + address.slice(0,6) + '…' + address.slice(-4));
+    if (CALLBACK) {
+      fetch(CALLBACK + '/callback?address=' + encodeURIComponent(address))
+        .catch(() => {});
+      setTimeout(() => window.close(), 1800);
+    }
+  }
+
+  async function sendMagicLink() {
+    const email = document.getElementById('email').value.trim();
+    if (!email) { setErr('Enter your email.'); return; }
+    setStatus('Sending magic link…');
+    setErr('');
+    // Magic link flow: open Reown hosted connect page with email prefilled
+    const url = 'https://verify.walletconnect.org/?projectId=' + PROJECT_ID + '&email=' + encodeURIComponent(email);
+    window.open(url, '_blank');
+    setStatus('Check your email — click the magic link to connect.');
+  }
+
+  async function openWcModal() {
+    if (!window.WalletConnectModal) { setErr('WalletConnect not loaded.'); return; }
+    try {
+      const modal = new window.WalletConnectModal.WalletConnectModal({
+        projectId: PROJECT_ID,
+        chains: ['solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp'],
+      });
+      await modal.openModal();
+      modal.subscribeModal(state => {
+        if (!state.open) {
+          const session = modal.getActiveSessions?.();
+          const addr = session && Object.values(session)[0]?.namespaces?.solana?.accounts?.[0]?.split(':')?.[2];
+          if (addr) sendCallback(addr);
+        }
+      });
+    } catch(e) { setErr('WalletConnect error: ' + e.message); }
+  }
+<\/script>
+</body>
+</html>`;
+}
+
 // ─────────────────────────── Main router ──────────────────────────────────────
 
 export default {
@@ -253,6 +346,14 @@ export default {
     // Health check — no auth required
     if (url.pathname === "/health") {
       return json({ status: "ok", ts: Date.now() });
+    }
+
+    // Reown email login page — no HMAC needed, opened in user's browser
+    if (url.pathname === "/auth") {
+      const callback = url.searchParams.get("callback") ?? "";
+      return new Response(authPage(callback, env.REOWN_PROJECT_ID), {
+        headers: { "Content-Type": "text/html; charset=utf-8" },
+      });
     }
 
     // All other routes require HMAC auth

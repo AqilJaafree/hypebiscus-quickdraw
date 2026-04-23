@@ -1,11 +1,13 @@
 use anyhow::{bail, Result};
 use async_trait::async_trait;
 use futures::{Stream, StreamExt};
+use hmac::{Hmac, Mac};
 use pin_project_lite::pin_project;
-use reqwest::Client;
+use reqwest::{Client, RequestBuilder};
+use sha2::Sha256;
 use serde::{Deserialize, Serialize};
 use std::pin::Pin;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tracing::{debug, warn};
 
 use crate::provider::{AIProvider, AIRequest, AIResponse, TokenStream};
@@ -76,17 +78,36 @@ pub struct HaikuProvider {
     client: Client,
     /// URL of the Cloudflare Worker proxy — never the Anthropic API directly
     worker_url: String,
+    app_secret: String,
 }
 
 impl HaikuProvider {
-    pub fn new(worker_url: impl Into<String>) -> Self {
+    pub fn new(worker_url: impl Into<String>, app_secret: impl Into<String>) -> Self {
         Self {
             client: Client::builder()
                 .timeout(Duration::from_secs(30))
                 .build()
                 .expect("reqwest client"),
             worker_url: worker_url.into(),
+            app_secret: app_secret.into(),
         }
+    }
+
+    /// Attach HMAC-SHA256 auth headers to a request builder.
+    /// Worker verifies: HMAC(app_secret, "{timestamp}.{path}")
+    fn sign(&self, rb: RequestBuilder, path: &str) -> RequestBuilder {
+        let ts = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs()
+            .to_string();
+        let msg = format!("{ts}.{path}");
+        let mut mac = Hmac::<Sha256>::new_from_slice(self.app_secret.as_bytes())
+            .expect("HMAC accepts any key size");
+        mac.update(msg.as_bytes());
+        let sig = hex::encode(mac.finalize().into_bytes());
+        rb.header("X-Quickdraw-Timestamp", &ts)
+          .header("X-Quickdraw-Sig", &sig)
     }
 
     fn build_request<'a>(req: &'a AIRequest) -> AnthropicRequest<'a> {
@@ -134,11 +155,8 @@ impl AIProvider for HaikuProvider {
         let started = Instant::now();
         let body = Self::build_request(&req);
 
-        let resp = self.client
-            .post(format!("{}/ai/fast", self.worker_url))
-            .json(&body)
-            .send()
-            .await?;
+        let rb = self.client.post(format!("{}/ai/fast", self.worker_url)).json(&body);
+        let resp = self.sign(rb, "/ai/fast").send().await?;
 
         if !resp.status().is_success() {
             let status = resp.status();
@@ -196,11 +214,8 @@ impl AIProvider for HaikuProvider {
     async fn stream(&self, req: AIRequest) -> Result<TokenStream> {
         let body = Self::build_request(&req);
 
-        let resp = self.client
-            .post(format!("{}/ai/fast", self.worker_url))
-            .json(&body)
-            .send()
-            .await?;
+        let rb = self.client.post(format!("{}/ai/fast", self.worker_url)).json(&body);
+        let resp = self.sign(rb, "/ai/fast").send().await?;
 
         if !resp.status().is_success() {
             bail!("Haiku stream error: {}", resp.status());

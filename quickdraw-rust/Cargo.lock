@@ -2092,6 +2092,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "dotenvy"
+version = "0.15.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1aaf95b3e5c8f23aa320147307562d361db0ae0d51242340f558153b4eb2439b"
+
+[[package]]
 name = "downcast-rs"
 version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4912,7 +4918,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7d8fae84b431384b68627d0f9b3b1245fcf9f46f6c0e3dc902e9dce64edd1967"
 dependencies = [
  "libc",
- "windows-sys 0.45.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -5332,8 +5338,10 @@ name = "quickdraw"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "dotenvy",
  "eframe",
  "egui",
+ "open",
  "quickdraw-ai",
  "quickdraw-core",
  "quickdraw-defi",
@@ -5359,6 +5367,8 @@ dependencies = [
  "backon",
  "base64 0.22.1",
  "futures",
+ "hex",
+ "hmac 0.12.1",
  "pin-project-lite",
  "quickdraw-core",
  "quickdraw-infra",
@@ -5366,6 +5376,7 @@ dependencies = [
  "schemars",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
  "thiserror 1.0.69",
  "tokio",
  "tokio-tungstenite 0.21.0",
