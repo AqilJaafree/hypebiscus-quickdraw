@@ -69,6 +69,7 @@ pub struct DetectionEvent {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SafetyReport {
     pub score: u8,
+    pub ticker: Option<String>,
     pub mint_authority_disabled: bool,
     pub freeze_authority_disabled: bool,
     pub jupiter_listed: bool,

@@ -12,5 +12,5 @@ compatibility_flags = ["nodejs_compat"]
 
 [[kv_namespaces]]
 binding = "RATE_LIMIT_KV"
-id = "placeholder_replace_with_real_id"
-preview_id = "placeholder_replace_with_real_id"
+id = "431e107bbb604d89a778c8009e559dac"
+preview_id = "431e107bbb604d89a778c8009e559dac"

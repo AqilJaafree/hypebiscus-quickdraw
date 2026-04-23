@@ -45,8 +45,10 @@ pub fn process(state: &mut AppState, cmd: Command) -> Vec<SideEffect> {
 
             vec![
                 SideEffect::ShowOverlay { position },
+                SideEffect::FetchSafetyScore { address },
                 SideEffect::FetchPrice { address },
-                SideEffect::DispatchAiNarration { address },
+                // AI narration fires after FetchSafetyScore completes (inside dispatch_effect)
+                // so it has price + safety context. Not dispatched here.
             ]
         }
 
@@ -155,6 +157,18 @@ pub fn process(state: &mut AppState, cmd: Command) -> Vec<SideEffect> {
             vec![SideEffect::StopAudioCapture]
         }
 
+        Command::ToggleSettings => {
+            state.settings_visible = !state.settings_visible;
+            state.version += 1;
+            vec![]
+        }
+
+        Command::ToggleDetection => {
+            state.detection_enabled = !state.detection_enabled;
+            state.version += 1;
+            vec![]
+        }
+
         Command::Shutdown => {
             vec![SideEffect::Shutdown]
         }
@@ -186,7 +200,7 @@ mod tests {
         assert!(state.token_address.is_some());
         assert!(effects.iter().any(|e| matches!(e, SideEffect::FetchSafetyScore { .. })));
         assert!(effects.iter().any(|e| matches!(e, SideEffect::FetchPrice { .. })));
-        assert!(effects.iter().any(|e| matches!(e, SideEffect::DispatchAiNarration { .. })));
+        // AI narration is deferred until after FetchSafetyScore completes
     }
 
     #[test]

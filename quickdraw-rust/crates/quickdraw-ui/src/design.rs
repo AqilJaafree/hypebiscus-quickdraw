@@ -37,12 +37,25 @@ impl Colors {
 pub struct Tokens;
 
 impl Tokens {
+    // Stroke & Shadow
     pub const STROKE_WIDTH: f32    = 2.0;
     pub const SHADOW_OFFSET: Vec2  = Vec2::new(4.0, 4.0);
     pub const CORNER_RADIUS: f32   = 0.0;
+
+    // Padding
     pub const PANEL_PADDING: Vec2  = Vec2::new(14.0, 12.0);
     pub const BUTTON_PADDING: Vec2 = Vec2::new(14.0, 8.0);
-    pub const OVERLAY_WIDTH: f32   = 340.0;
+
+    // Popup dimensions
+    pub const POPUP_WIDTH: f32        = 260.0;
+    pub const POPUP_H_LOADING: f32    = 75.0;
+    pub const POPUP_H_FULL: f32       = 100.0;
+    pub const POPUP_H_WITH_AI: f32    = 162.0;
+    pub const OVERLAY_WIDTH: f32      = 340.0; // old overlay, unused now
+
+    // Settings panel
+    pub const PANEL_WIDTH: f32     = 260.0;
+    pub const PANEL_HEIGHT: f32    = 400.0;
 }
 
 /// Convenience: bold label text suitable for neobrutalism headings.
