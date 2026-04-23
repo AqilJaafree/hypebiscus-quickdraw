@@ -45,6 +45,7 @@ pub fn process(state: &mut AppState, cmd: Command) -> Vec<SideEffect> {
 
             vec![
                 SideEffect::ShowOverlay { position },
+                SideEffect::FetchSafetyScore { address },
                 SideEffect::FetchPrice { address },
                 SideEffect::DispatchAiNarration { address },
             ]
@@ -153,6 +154,18 @@ pub fn process(state: &mut AppState, cmd: Command) -> Vec<SideEffect> {
             state.fsm = QuickdrawState::Idle;
             state.version += 1;
             vec![SideEffect::StopAudioCapture]
+        }
+
+        Command::ToggleSettings => {
+            state.settings_visible = !state.settings_visible;
+            state.version += 1;
+            vec![]
+        }
+
+        Command::ToggleDetection => {
+            state.detection_enabled = !state.detection_enabled;
+            state.version += 1;
+            vec![]
         }
 
         Command::Shutdown => {

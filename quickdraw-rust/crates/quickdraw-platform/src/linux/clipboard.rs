@@ -29,7 +29,7 @@ pub fn spawn_selection_watcher() -> tokio::sync::mpsc::Receiver<(String, Point)>
     // Attach cursor position and forward
     std::thread::spawn(move || {
         while let Some(text) = rx_inner.blocking_recv() {
-            let pos = read_cursor_position().unwrap_or(Point { x: 5.0, y: 5.0 });
+            let pos = cursor_position().unwrap_or(Point { x: 5.0, y: 5.0 });
             if tx_outer.blocking_send((text, pos)).is_err() {
                 break;
             }
@@ -94,7 +94,7 @@ fn get_text(clipboard: &mut arboard::Clipboard, primary: bool) -> anyhow::Result
 // Cursor position (X11 only via xdotool)
 // ─────────────────────────────────────────────────────────────────────────────
 
-fn read_cursor_position() -> Option<Point> {
+pub fn cursor_position() -> Option<Point> {
     let out = std::process::Command::new("xdotool")
         .arg("getmouselocation")
         .output()

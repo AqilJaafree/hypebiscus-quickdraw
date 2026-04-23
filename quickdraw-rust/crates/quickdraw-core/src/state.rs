@@ -68,11 +68,13 @@ impl Default for QuickdrawState {
 }
 
 /// Full mutable truth — owned by the engine task.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct AppState {
     pub fsm: QuickdrawState,
     pub wallet_pubkey: Option<Pubkey>,
     pub token_address: Option<Pubkey>,
+    pub token_ticker: Option<String>,
+    pub last_seen_ticker: Option<String>,
     pub safety_report: Option<SafetyReport>,
     pub token_price: Option<TokenPrice>,
     pub quotes: Vec<AdapterQuote>,
@@ -81,7 +83,32 @@ pub struct AppState {
     pub overlay_visible: bool,
     pub overlay_position: Point,
     pub ai_mode: AiMode,
+    pub settings_visible: bool,
+    pub detection_enabled: bool,
     pub version: u64,
+}
+
+impl Default for AppState {
+    fn default() -> Self {
+        Self {
+            detection_enabled: true,
+            fsm: Default::default(),
+            wallet_pubkey: None,
+            token_address: None,
+            token_ticker: None,
+            last_seen_ticker: None,
+            safety_report: None,
+            token_price: None,
+            quotes: Vec::new(),
+            ai_narration: None,
+            ai_streaming: false,
+            overlay_visible: false,
+            overlay_position: Default::default(),
+            ai_mode: Default::default(),
+            settings_visible: false,
+            version: 0,
+        }
+    }
 }
 
 impl AppState {
@@ -90,6 +117,8 @@ impl AppState {
             fsm: self.fsm.clone(),
             wallet_pubkey: self.wallet_pubkey,
             token_address: self.token_address,
+            token_ticker: self.token_ticker.clone(),
+            last_seen_ticker: self.last_seen_ticker.clone(),
             safety_report: self.safety_report.clone(),
             token_price: self.token_price.clone(),
             quotes: self.quotes.clone(),
@@ -98,6 +127,8 @@ impl AppState {
             overlay_visible: self.overlay_visible,
             overlay_position: self.overlay_position,
             ai_mode: self.ai_mode,
+            settings_visible: self.settings_visible,
+            detection_enabled: self.detection_enabled,
             version: self.version,
         }
     }
@@ -109,6 +140,8 @@ pub struct AppSnapshot {
     pub fsm: QuickdrawState,
     pub wallet_pubkey: Option<Pubkey>,
     pub token_address: Option<Pubkey>,
+    pub token_ticker: Option<String>,
+    pub last_seen_ticker: Option<String>,
     pub safety_report: Option<SafetyReport>,
     pub token_price: Option<TokenPrice>,
     pub quotes: Vec<AdapterQuote>,
@@ -117,6 +150,8 @@ pub struct AppSnapshot {
     pub overlay_visible: bool,
     pub overlay_position: Point,
     pub ai_mode: AiMode,
+    pub settings_visible: bool,
+    pub detection_enabled: bool,
     pub version: u64,
 }
 

@@ -3,7 +3,7 @@ use std::time::{Duration, Instant};
 use solana_sdk::pubkey::Pubkey;
 use tokio::sync::Mutex;
 
-const COOLDOWN: Duration = Duration::from_secs(300); // 5 minutes
+const COOLDOWN: Duration = Duration::from_secs(30); // 30 seconds — re-show if user copies same token again after 30s
 
 pub struct Deduplicator {
     seen: Mutex<HashMap<Pubkey, Instant>>,

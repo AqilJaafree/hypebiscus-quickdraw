@@ -2,21 +2,44 @@
 
 ## Overview
 
-Cross-platform desktop companion app for Solana DeFi traders. Lives in the system tray on
-Windows, Linux, and macOS. Detects token addresses and tickers anywhere on screen — in
-browsers (Twitter/X, Telegram Web, Reddit), desktop apps (Discord, Slack, Telegram), or
-any other surface via OCR fallback. Surfaces token safety scores, price charts, AI analysis,
-and one-click swaps via Jupiter, Orca, Meteora, and Raydium — without leaving whatever app
-the user is in.
+Quickdraw is a passive DeFi intelligence layer for Solana traders. It runs silently in
+the background — no window, no dashboard — and surfaces token analysis the moment you
+highlight or copy a token address anywhere on your computer.
 
-Inspired by Grammarly's UX: present near where you work, never in the way.
+It ships in two forms that work together:
+
+### Native Desktop App (laptop / PC)
+Runs as an invisible background process on Windows, Linux, and macOS. When you highlight
+a Solana token address in **any app** — Discord, Telegram desktop, a terminal, a PDF, a
+tweet — a small popup appears near your cursor showing the token's organic score and a
+quick action. It auto-dismisses in 5 seconds. You never leave the app you're in.
+
+Detects tokens from:
+- **Clipboard** — anything you Ctrl+C
+- **Primary selection** — anything you highlight with your cursor (no copy needed)
+- **OCR fallback** — screenshots, images, games, anything rendered on screen
+
+### Browser Extension (Chrome / Brave / Arc / Firefox)
+For users who primarily trade from the browser. Detects token addresses and `$TICKER`
+symbols directly in the DOM on Twitter/X, Telegram Web, Reddit, DexScreener, pump.fun,
+and any other site. Passes richer context to the popup — tweet author, engagement, URL
+— so the AI analysis is more accurate than clipboard detection alone.
+
+The extension and the native app work together: the extension feeds detections into the
+native app, which handles rendering the overlay on top of the browser window at the OS
+level (not inside the DOM). If only the extension is installed, it falls back to a
+lightweight in-page tooltip.
+
+Both share the same Cloudflare Worker backend. No API keys ever touch the client.
 
 ---
 
 ## Core UX Philosophy
 
-- **Contextual** — overlay floats near cursor/detected token, not in a fixed corner
-- **Non-intrusive** — never steals focus, dismisses with Escape or click-away
+- **Passive by default** — runs in background like Grass; no interaction required to get value
+- **Contextual** — popup appears where you are, not in a separate window
+- **Auto-dismissing** — disappears after 5s, never gets in the way
+- **Dual surface** — native app covers every desktop app; extension covers every website
 - **Zero context switch** — user never leaves Discord/Twitter/their terminal
 - **No custody** — Quickdraw never holds private keys; all signing in user's wallet
 - **No secrets in binary** — all API keys live on Cloudflare Worker proxy

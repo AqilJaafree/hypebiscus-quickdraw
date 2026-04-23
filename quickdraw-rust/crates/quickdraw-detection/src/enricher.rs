@@ -53,7 +53,7 @@ impl DetectionEnricher {
                         }
                         break;
                     } else {
-                        info!(%pubkey, "token deduplicated (seen within 30s)");
+                        tracing::debug!(%pubkey, "token deduplicated (seen within cooldown)");
                     }
                 }
                 Err(e) => {

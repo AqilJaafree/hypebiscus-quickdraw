@@ -1,18 +1,29 @@
 use std::sync::{Arc, RwLock};
-use egui::{FontDefinitions, Margin, Rounding, Stroke, Vec2};
+use std::time::{Duration, Instant};
+use egui::{Margin, Rounding, Stroke, Vec2};
+#[allow(unused_imports)]
 use tokio::sync::mpsc;
-use tracing::info;
 
 use quickdraw_core::{commands::Command, state::AppSnapshot};
 use crate::design::{Colors, Tokens};
-use crate::overlay::show_overlay;
 #[allow(unused_imports)]
-use egui::Ui;
+use crate::widgets::{safety_badge, ghost_button, loading_row};
+use crate::panel::show_settings_panel;
+use crate::header;
 
+const AUTO_DISMISS_SECS: f32 = 5.0;
+
+/// Main application state for the Quickdraw egui UI.
+///
+/// Runs as a single eframe viewport that shows/hides based on token detections.
+/// In demo mode, the window is visible immediately; otherwise it starts hidden
+/// and appears only when a Solana address is detected.
 pub struct QuickdrawApp {
-    snapshot: Arc<RwLock<AppSnapshot>>,
-    cmd_tx: mpsc::Sender<Command>,
-    address_input: String,
+    snapshot:             Arc<RwLock<AppSnapshot>>,
+    cmd_tx:               mpsc::Sender<Command>,
+    demo_mode:            bool,
+    prev_overlay_visible: bool,
+    overlay_shown_at:     Option<Instant>,
 }
 
 impl QuickdrawApp {
@@ -20,180 +31,196 @@ impl QuickdrawApp {
         cc: &eframe::CreationContext<'_>,
         snapshot: Arc<RwLock<AppSnapshot>>,
         cmd_tx: mpsc::Sender<Command>,
+        demo_mode: bool,
     ) -> Self {
         apply_neobrutalism_theme(&cc.egui_ctx);
         load_fonts(&cc.egui_ctx);
-
         Self {
             snapshot,
             cmd_tx,
-            address_input: String::new(),
+            demo_mode,
+            prev_overlay_visible: false,
+            overlay_shown_at: None,
         }
     }
 }
 
 impl eframe::App for QuickdrawApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        // Clone snapshot once — zero lock contention on the render path
         let snap = self.snapshot.read().unwrap().clone();
 
-        // Main status window
+        // ── Visibility transitions ────────────────────────────────────────────
+        if snap.overlay_visible != self.prev_overlay_visible {
+            self.prev_overlay_visible = snap.overlay_visible;
+            if snap.overlay_visible {
+                let x = snap.overlay_position.x + 20.0;
+                let y = snap.overlay_position.y + 10.0;
+                ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
+                ctx.send_viewport_cmd(egui::ViewportCommand::OuterPosition(egui::pos2(x, y)));
+                ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(egui::vec2(Tokens::POPUP_WIDTH, Tokens::POPUP_H_LOADING)));
+                ctx.send_viewport_cmd(egui::ViewportCommand::WindowLevel(egui::WindowLevel::AlwaysOnTop));
+                ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+                self.overlay_shown_at = Some(Instant::now());
+            } else {
+                ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
+                self.overlay_shown_at = None;
+            }
+        }
+
+        // ── Auto-dismiss countdown (skipped in demo mode) ─────────────────────
+        let elapsed = self.overlay_shown_at
+            .map(|t| t.elapsed().as_secs_f32())
+            .unwrap_or(0.0);
+
+        if snap.overlay_visible && !self.demo_mode {
+            if elapsed >= AUTO_DISMISS_SECS {
+                let _ = self.cmd_tx.try_send(Command::DismissOverlay);
+            } else {
+                ctx.request_repaint_after(Duration::from_millis(80));
+                let h = popup_height(&snap);
+                ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(egui::vec2(Tokens::POPUP_WIDTH, h)));
+            }
+        } else if snap.overlay_visible {
+            // Demo: still repaint for the countdown animation, but don't dismiss
+            ctx.request_repaint_after(Duration::from_millis(80));
+            let h = popup_height(&snap);
+            ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(egui::vec2(Tokens::POPUP_WIDTH, h)));
+        }
+
+        // ── Settings panel (second viewport) ─────────────────────────────────
+        show_settings_panel(ctx, self.snapshot.clone(), &self.cmd_tx);
+
+        // ── Render ────────────────────────────────────────────────────────────
         egui::CentralPanel::default()
-            .frame(
-                egui::Frame::none()
-                    .fill(Colors::PANEL_BG)
-                    .inner_margin(Margin::symmetric(16.0, 12.0)),
-            )
+            .frame(egui::Frame::none().fill(Colors::OVERLAY_BG))
             .show(ctx, |ui| {
-                ui.horizontal(|ui| {
-                    ui.label(
-                        egui::RichText::new("⚡ Quickdraw")
-                            .size(16.0)
-                            .strong()
-                            .color(Colors::TEXT_PRIMARY),
-                    );
-
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        let mode_label = format!("{:?}", snap.ai_mode);
-                        ui.label(
-                            egui::RichText::new(mode_label)
-                                .size(10.0)
-                                .color(egui::Color32::GRAY),
-                        );
-                    });
-                });
-
-                ui.add_space(4.0);
-
-                let status = if snap.wallet_pubkey.is_some() {
-                    let addr = snap.wallet_pubkey.unwrap().to_string();
-                    format!("Wallet: {}…{}", &addr[..4], &addr[addr.len()-4..])
-                } else {
-                    "Wallet: not connected".into()
-                };
-                ui.label(egui::RichText::new(status).size(11.0).color(egui::Color32::GRAY));
-
-                ui.add_space(4.0);
-                ui.label(
-                    egui::RichText::new("Watching clipboard for token addresses…")
-                        .size(11.0)
-                        .color(egui::Color32::GRAY),
-                );
-
-                // Manual address input — bypasses clipboard, goes through real engine pipeline
-                ui.add_space(6.0);
-                ui.horizontal(|ui| {
-                    let input = egui::TextEdit::singleline(&mut self.address_input)
-                        .hint_text("Paste address here…")
-                        .desired_width(200.0);
-                    let response = ui.add(input);
-
-                    let submitted = response.lost_focus()
-                        && ctx.input(|i| i.key_pressed(egui::Key::Enter));
-
-                    if crate::widgets::brutal_button(ui, "Detect").clicked() || submitted {
-                        let addr = self.address_input.trim().to_string();
-                        if !addr.is_empty() {
-                            let pubkey: solana_sdk::pubkey::Pubkey = addr.parse()
-                                .unwrap_or_default();
-                            println!("DETECT clicked: addr={addr} pubkey={pubkey}");
-                            match self.cmd_tx.try_send(
-                                quickdraw_core::commands::Command::TokenDetected(
-                                    quickdraw_core::types::DetectionEvent {
-                                        address: pubkey,
-                                        position: quickdraw_core::types::Point { x: 100.0, y: 100.0 },
-                                        source: quickdraw_core::types::DetectionSource::Manual,
-                                        raw_text: addr.clone(),
-                                    }
-                                )
-                            ) {
-                                Ok(_)  => println!("DETECT: command sent OK"),
-                                Err(e) => println!("DETECT ERROR: {e}"),
-                            }
-                            self.address_input.clear();
-                        }
-                    }
-                });
-
-                ui.add_space(4.0);
-                if crate::widgets::ghost_button(ui, "Demo (fake data)").clicked() {
-                    let mut lock = self.snapshot.write().unwrap();
-                    *lock = demo_snapshot();
-                    ctx.request_repaint();
-                }
-
-                // Token card rendered inline — no floating Window/Area so no
-                // Sense::click_and_drag on a background rect keeping repaint hot.
                 if snap.overlay_visible {
-                    ui.add_space(8.0);
-                    show_overlay(ui, &snap, &self.cmd_tx);
+                    show_popup(ui, &snap, &self.cmd_tx, elapsed);
+                }
+                if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+                    let _ = self.cmd_tx.try_send(Command::DismissOverlay);
                 }
             });
-
-
     }
 }
 
-/// Test data snapshot — lets us validate the UI without live detection.
-pub fn demo_snapshot() -> AppSnapshot {
-    use quickdraw_core::types::{AdapterQuote, SafetyReport, TokenPrice};
-    use quickdraw_core::state::AiMode;
-    use solana_sdk::pubkey::Pubkey;
-    use std::str::FromStr;
-
-    let bonk = Pubkey::from_str("DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263").unwrap_or_default();
-
-    AppSnapshot {
-        overlay_visible: true,
-        overlay_position: quickdraw_core::types::Point { x: 80.0, y: 80.0 },
-        token_address: Some(bonk),
-        safety_report: Some(SafetyReport {
-            score: 82,
-            mint_authority_disabled: true,
-            freeze_authority_disabled: true,
-            jupiter_listed: true,
-            top_holder_pct: 0.08,
-            liquidity_usd: 4_200_000.0,
-            rugcheck_ok: true,
-            summary: "Low risk — passes all major safety checks. Strong liquidity, no mint authority.".into(),
-        }),
-        token_price: Some(TokenPrice {
-            price_usd: 0.000_021_4,
-            change_24h_pct: 12.3,
-            volume_24h_usd: 38_400_000.0,
-            market_cap_usd: Some(1_430_000_000.0),
-        }),
-        quotes: vec![
-            AdapterQuote {
-                adapter_name: "Jupiter".into(),
-                in_amount: 1_000_000_000,
-                out_amount: 46_728_301,
-                price_impact_pct: 0.02,
-                slippage_bps: 50,
-                fee_usd: 0.003,
-                route_label: "Orca Whirlpool".into(),
-            },
-            AdapterQuote {
-                adapter_name: "Orca".into(),
-                in_amount: 1_000_000_000,
-                out_amount: 46_510_100,
-                price_impact_pct: 0.08,
-                slippage_bps: 50,
-                fee_usd: 0.005,
-                route_label: "Orca Direct".into(),
-            },
-        ],
-        ai_narration: Some(
-            "BONK is Solana's flagship community meme coin. Strong liquidity and wide exchange listing \
-             suggest established market presence. Up 12.3% today on elevated volume — consistent with \
-             broader Solana ecosystem momentum.".into()
-        ),
-        ai_streaming: false,
-        ai_mode: AiMode::Auto,
-        version: 1,
-        ..Default::default()
-    }
+fn popup_height(snap: &AppSnapshot) -> f32 {
+    if snap.safety_report.is_some() { Tokens::POPUP_H_FULL } else { Tokens::POPUP_H_LOADING }
 }
+
+// ─────────────────────────── Popup UI (V3) ───────────────────────────────────
+// Design: score fills entire header as safety-colored block.
+// Ticker shown (not address). Price below. No buttons. No countdown bar.
+
+fn show_popup(
+    ui: &mut egui::Ui,
+    snap: &AppSnapshot,
+    cmd_tx: &mpsc::Sender<Command>,
+    _elapsed: f32,
+) {
+    let loading = snap.safety_report.is_none();
+    let score = snap.safety_report.as_ref().map(|r| r.score).unwrap_or(0);
+    let header_color = if loading {
+        egui::Color32::from_rgb(0x1E, 0x1E, 0x1E)
+    } else {
+        Colors::safety_color(score)
+    };
+    let ticker = snap.token_ticker.as_deref()
+        .or(snap.safety_report.as_ref().and_then(|r| r.ticker.as_deref()))
+        .unwrap_or("———");
+
+    egui::Frame::none()
+        .fill(Colors::OVERLAY_BG)
+        .inner_margin(Margin::ZERO)
+        .show(ui, |ui| {
+            // ── Drag zone (registered first so buttons take priority) ──────
+            // Covers left ~70% of header height; right side reserved for buttons.
+            let drag_rect = egui::Rect::from_min_size(
+                ui.cursor().min,
+                egui::vec2(Tokens::POPUP_WIDTH * 0.70, 65.0),
+            );
+            if ui.interact(drag_rect, egui::Id::new("popup_drag"), egui::Sense::drag())
+                .drag_started()
+            {
+                ui.ctx().send_viewport_cmd(egui::ViewportCommand::StartDrag);
+            }
+
+            // ── Score-first header ─────────────────────────────────────────
+            let header_resp = header::render_header(
+                ui,
+                loading,
+                score,
+                ticker,
+                header_color,
+                cmd_tx,
+            );
+
+            let _ = header_resp;
+
+            // ── Price row ──────────────────────────────────────────────────
+            egui::Frame::none()
+                .fill(Colors::OVERLAY_BG)
+                .inner_margin(Margin { left: 12.0, right: 10.0, top: 8.0, bottom: 10.0 })
+                .show(ui, |ui| {
+                    if loading {
+                        ui.label(
+                            egui::RichText::new("Fetching…")
+                                .size(12.0)
+                                .monospace()
+                                .color(egui::Color32::WHITE),
+                        );
+                    } else if let Some(price) = &snap.token_price {
+                        let up = price.change_24h_pct >= 0.0;
+                        let change_color = if up { Colors::SAFE } else { Colors::DANGER };
+                        let arrow = if up { "▲" } else { "▼" };
+                        ui.horizontal(|ui| {
+                            ui.label(
+                                egui::RichText::new(format_price(price.price_usd))
+                                    .size(13.0)
+                                    .strong()
+                                    .monospace()
+                                    .color(egui::Color32::WHITE),
+                            );
+                            ui.label(
+                                egui::RichText::new(format!("{} {:.1}%", arrow, price.change_24h_pct.abs()))
+                                    .size(12.0)
+                                    .strong()
+                                    .monospace()
+                                    .color(change_color),
+                            );
+                        });
+                    } else {
+                        ui.label(
+                            egui::RichText::new("Fetching…")
+                                .size(12.0)
+                                .monospace()
+                                .color(egui::Color32::WHITE),
+                        );
+                    }
+                });
+        });
+
+    // 2px black border around entire popup
+    let r = ui.ctx().screen_rect();
+    ui.painter().rect_stroke(r, 0.0, egui::Stroke::new(2.0, egui::Color32::BLACK));
+}
+
+
+fn format_price(p: f64) -> String {
+    if p >= 1.0        { format!("${:.2}", p) }
+    else if p >= 0.01  { format!("${:.4}", p) }
+    else if p >= 0.001 { format!("${:.5}", p) }
+    else               { format!("${:.6}", p) }
+}
+
+fn format_large_usd(v: f64) -> String {
+    if v >= 1_000_000_000.0 { format!("${:.1}B", v / 1_000_000_000.0) }
+    else if v >= 1_000_000.0 { format!("${:.1}M", v / 1_000_000.0) }
+    else if v >= 1_000.0     { format!("${:.0}K", v / 1_000.0) }
+    else                     { format!("${:.0}", v) }
+}
+
+// ─────────────────────────── Theme ───────────────────────────────────────────
 
 pub fn apply_neobrutalism_theme(ctx: &egui::Context) {
     let mut visuals = egui::Visuals::light();
@@ -228,15 +255,91 @@ pub fn apply_neobrutalism_theme(ctx: &egui::Context) {
 }
 
 fn load_fonts(ctx: &egui::Context) {
-    // Default egui fonts work fine; Space Grotesk can be added by placing
-    // assets/SpaceGrotesk-Bold.ttf and uncommenting the block below.
-    //
-    // let mut fonts = FontDefinitions::default();
-    // fonts.font_data.insert(
-    //     "SpaceGrotesk".to_owned(),
-    //     egui::FontData::from_static(include_bytes!("../assets/SpaceGrotesk-Bold.ttf")),
-    // );
-    // fonts.families.get_mut(&egui::FontFamily::Proportional)
-    //     .unwrap().insert(0, "SpaceGrotesk".to_owned());
-    // ctx.set_fonts(fonts);
+    let mut fonts = egui::FontDefinitions::default();
+
+    // Space Mono Regular
+    fonts.font_data.insert(
+        "SpaceMono".into(),
+        egui::FontData::from_static(include_bytes!(
+            "../../../assets/SpaceMono-Regular.ttf"
+        )).into(),
+    );
+    // Space Mono Bold
+    fonts.font_data.insert(
+        "SpaceMonoBold".into(),
+        egui::FontData::from_static(include_bytes!(
+            "../../../assets/SpaceMono-Bold.ttf"
+        )).into(),
+    );
+
+    // Make Space Mono the first choice for both proportional and monospace slots
+    fonts.families
+        .entry(egui::FontFamily::Proportional)
+        .or_default()
+        .insert(0, "SpaceMonoBold".into());
+
+    fonts.families
+        .entry(egui::FontFamily::Monospace)
+        .or_default()
+        .insert(0, "SpaceMono".into());
+
+    ctx.set_fonts(fonts);
+}
+
+// ─────────────────────────── Demo snapshot ───────────────────────────────────
+
+/// Returns a populated snapshot for demo mode (--demo flag).
+///
+/// Includes BONK token data, safety score 82, price, and AI narration
+/// so the popup appears immediately in a realistic state.
+pub fn demo_snapshot() -> AppSnapshot {
+    use quickdraw_core::types::{AdapterQuote, SafetyReport, TokenPrice};
+    use quickdraw_core::state::AiMode;
+    use solana_sdk::pubkey::Pubkey;
+    use std::str::FromStr;
+
+    let bonk = Pubkey::from_str("DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263").unwrap_or_default();
+
+    AppSnapshot {
+        overlay_visible: true,
+        overlay_position: quickdraw_core::types::Point { x: 80.0, y: 80.0 },
+        token_address: Some(bonk),
+        token_ticker: Some("BONK".into()),
+        last_seen_ticker: Some("BONK".into()),
+        safety_report: Some(SafetyReport {
+            score: 82,
+            ticker: Some("BONK".into()),
+            mint_authority_disabled: true,
+            freeze_authority_disabled: true,
+            jupiter_listed: true,
+            top_holder_pct: 0.08,
+            liquidity_usd: 4_200_000.0,
+            rugcheck_ok: true,
+            summary: "✓ Jupiter verified · mint auth disabled · high organic activity · organic 82/100".into(),
+        }),
+        token_price: Some(TokenPrice {
+            price_usd: 0.000_021_4,
+            change_24h_pct: 12.3,
+            volume_24h_usd: 38_400_000.0,
+            market_cap_usd: Some(1_430_000_000.0),
+        }),
+        quotes: vec![AdapterQuote {
+            adapter_name: "Jupiter".into(),
+            in_amount: 1_000_000_000,
+            out_amount: 46_728_301,
+            price_impact_pct: 0.02,
+            slippage_bps: 50,
+            fee_usd: 0.003,
+            route_label: "Orca Whirlpool".into(),
+        }],
+        ai_narration: Some(
+            "BONK is Solana's flagship meme coin. Up 12.3% today on strong volume.".into()
+        ),
+        ai_streaming: false,
+        ai_mode: AiMode::Auto,
+        settings_visible: false,
+        detection_enabled: true,
+        version: 1,
+        ..Default::default()
+    }
 }
