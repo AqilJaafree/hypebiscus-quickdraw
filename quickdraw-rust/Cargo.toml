@@ -109,6 +109,7 @@ solana-sdk          = { workspace = true }
 tracing             = { workspace = true }
 tracing-subscriber  = { workspace = true }
 dotenvy             = { workspace = true }
+open                = { workspace = true }
 anyhow              = { workspace = true }
 
 [profile.dev]

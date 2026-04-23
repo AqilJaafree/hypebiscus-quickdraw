@@ -1,97 +1,35 @@
-use std::sync::{Arc, RwLock};
 use std::time::Instant;
-use egui::{Margin, RichText, ViewportBuilder, ViewportId};
+use egui::{Margin, RichText};
 use tokio::sync::mpsc;
 
 use quickdraw_core::{commands::Command, state::{AiMode, AppSnapshot}};
 use crate::design::{Colors, Tokens};
+use crate::wallet_ui::WalletUiState;
 
-/// Public entry point for rendering panel content into any Ui
-/// (used by the main window which IS the settings panel).
-pub fn draw_panel_content(ui: &mut egui::Ui, snap: &AppSnapshot, cmd_tx: &mpsc::Sender<Command>) {
+/// Public entry point for rendering panel content into any Ui.
+pub fn draw_panel_content(
+    ui: &mut egui::Ui,
+    snap: &AppSnapshot,
+    cmd_tx: &mpsc::Sender<Command>,
+    wallet_ui: &mut WalletUiState,
+    ctx: &egui::Context,
+) {
     let session_label = session_label();
-    draw_panel(ui, snap, cmd_tx, &session_label);
+    draw_panel(ui, snap, cmd_tx, &session_label, wallet_ui, ctx);
 }
 
 const DARK_BG:     egui::Color32 = egui::Color32::from_rgb(0x18, 0x18, 0x18);
 const HEADER_DARK: egui::Color32 = egui::Color32::from_rgb(0x11, 0x11, 0x11);
 const SEP:         egui::Color32 = egui::Color32::from_rgb(0x2E, 0x2E, 0x2E);
 
-/// Show the settings panel as a separate always-on-top OS window.
-/// Position is locked on first open — does not chase the popup when it moves.
-pub fn show_settings_panel(
-    ctx: &egui::Context,
-    snapshot: Arc<RwLock<AppSnapshot>>,
-    cmd_tx: &mpsc::Sender<Command>,
-) {
-    let visible = snapshot.read().unwrap().settings_visible;
-
-    // Clear stored position so next open re-anchors to popup
-    thread_local! {
-        static LOCKED_POS: std::cell::Cell<Option<(f32, f32)>> = std::cell::Cell::new(None);
-    }
-    if !visible {
-        LOCKED_POS.with(|p| p.set(None));
-        return;
-    }
-
-    // On first open: anchor next to the popup. Every frame after: reuse locked pos.
-    let (panel_x, panel_y) = LOCKED_POS.with(|p| {
-        if let Some(pos) = p.get() {
-            pos
-        } else {
-            let outer = ctx.input(|i| i.viewport().outer_rect);
-            let pos = match outer {
-                Some(r) if r.min.x > 0.0 => (r.max.x + 8.0, r.min.y),
-                _ => (500.0, 100.0),
-            };
-            p.set(Some(pos));
-            pos
-        }
-    });
-
-    let builder = ViewportBuilder::default()
-        .with_title("Quickdraw Settings")
-        .with_inner_size([Tokens::PANEL_WIDTH, Tokens::PANEL_HEIGHT])
-        .with_resizable(false)
-        .with_decorations(false)
-        .with_position([panel_x, panel_y])
-        .with_window_level(egui::WindowLevel::AlwaysOnTop);
-
-    let cmd_tx = cmd_tx.clone();
-
-    ctx.show_viewport_deferred(
-        ViewportId::from_hash_of("quickdraw_settings"),
-        builder,
-        move |ctx, _| {
-            let snap = snapshot.read().unwrap().clone();
-
-            if !snap.settings_visible {
-                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
-                return;
-            }
-
-            if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
-                let _ = cmd_tx.try_send(Command::ToggleSettings);
-            }
-
-            let session_label = session_label();
-            egui::CentralPanel::default()
-                .frame(egui::Frame::none()
-                    .fill(DARK_BG)
-                    .stroke(egui::Stroke::new(2.0, egui::Color32::BLACK)))
-                .show(ctx, |ui| {
-                    draw_panel(ui, &snap, &cmd_tx, &session_label);
-                });
-        },
-    );
-}
 
 fn draw_panel(
     ui: &mut egui::Ui,
     snap: &AppSnapshot,
     cmd_tx: &mpsc::Sender<Command>,
     session_label: &str,
+    wallet_ui: &mut WalletUiState,
+    ctx: &egui::Context,
 ) {
     // Drag zone (left 75%, registered before header so X button keeps priority)
     let drag_rect = egui::Rect::from_min_size(
@@ -177,7 +115,7 @@ fn draw_panel(
                 .inner_margin(Margin::symmetric(12.0, 12.0))
                 .show(ui, |ui| {
                     match active {
-                        0 => draw_state_tab(ui, snap, cmd_tx, session_label),
+                        0 => draw_state_tab(ui, snap, cmd_tx, session_label, wallet_ui, ctx),
                         _ => draw_skills_tab(ui),
                     }
                 });
@@ -196,7 +134,14 @@ fn draw_panel(
 
 // ── State Tab ────────────────────────────────────────────────────────────────
 
-fn draw_state_tab(ui: &mut egui::Ui, snap: &AppSnapshot, cmd_tx: &mpsc::Sender<Command>, session_label: &str) {
+fn draw_state_tab(
+    ui: &mut egui::Ui,
+    snap: &AppSnapshot,
+    cmd_tx: &mpsc::Sender<Command>,
+    session_label: &str,
+    wallet_ui: &mut WalletUiState,
+    ctx: &egui::Context,
+) {
     ui.horizontal(|ui| {
         let (dot_rect, _) = ui.allocate_exact_size(egui::vec2(14.0, 14.0), egui::Sense::hover());
         let dot_color = if snap.detection_enabled { Colors::SAFE } else { egui::Color32::from_rgb(0x55, 0x55, 0x55) };
@@ -250,37 +195,7 @@ fn draw_state_tab(ui: &mut egui::Ui, snap: &AppSnapshot, cmd_tx: &mpsc::Sender<C
     ui.add_space(10.0);
 
     slabel(ui, "LOGIN");
-    if let Some(wallet) = snap.wallet_pubkey {
-        let s = wallet.to_string();
-        let short = format!("{}…{}", &s[..6], &s[s.len()-4..]);
-        egui::Frame::none()
-            .fill(egui::Color32::from_rgb(0x1A, 0x1A, 0x1A))
-            .stroke(egui::Stroke::new(1.5, egui::Color32::from_rgb(0x44, 0x44, 0x44)))
-            .inner_margin(Margin::symmetric(8.0, 5.0))
-            .show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    ui.label(RichText::new(&short).size(10.0).monospace().color(egui::Color32::from_rgb(0xAA, 0xAA, 0xAA)));
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui.add(
-                            egui::Button::new(RichText::new("Disconnect").size(10.0).monospace().color(Colors::DANGER))
-                                .fill(egui::Color32::TRANSPARENT).stroke(egui::Stroke::NONE)
-                        ).clicked() {
-                            let _ = cmd_tx.try_send(Command::DisconnectWallet);
-                        }
-                    });
-                });
-            });
-    } else {
-        if ui.add(
-            egui::Button::new(RichText::new("Connect Wallet").size(11.0).monospace().color(egui::Color32::BLACK))
-                .fill(Colors::ACCENT_YELLOW)
-                .stroke(egui::Stroke::new(1.5, egui::Color32::BLACK))
-                .rounding(egui::Rounding::ZERO)
-                .min_size(egui::vec2(ui.available_width(), 30.0))
-        ).clicked() {
-            let _ = cmd_tx.try_send(Command::ConnectWallet);
-        }
-    }
+    crate::wallet_ui::show_wallet_section(ui, snap, cmd_tx, wallet_ui, ctx);
 }
 
 // ── Skills Tab ───────────────────────────────────────────────────────────────

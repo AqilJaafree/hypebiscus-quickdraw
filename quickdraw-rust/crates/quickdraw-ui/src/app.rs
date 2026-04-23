@@ -5,14 +5,16 @@ use tokio::sync::mpsc;
 use quickdraw_core::{commands::Command, state::AppSnapshot};
 use crate::design::{Colors, Tokens};
 use crate::panel::draw_panel_content;
+use crate::wallet_ui::WalletUiState;
 use crate::header;
 
 /// Main window = settings panel (always visible on startup).
 /// Token popup = deferred viewport that appears near cursor on detection.
 pub struct QuickdrawApp {
-    snapshot: Arc<RwLock<AppSnapshot>>,
-    cmd_tx:   mpsc::Sender<Command>,
-    demo_mode: bool,
+    snapshot:   Arc<RwLock<AppSnapshot>>,
+    cmd_tx:     mpsc::Sender<Command>,
+    demo_mode:  bool,
+    wallet_ui:  WalletUiState,
 }
 
 impl QuickdrawApp {
@@ -24,7 +26,7 @@ impl QuickdrawApp {
     ) -> Self {
         apply_neobrutalism_theme(&cc.egui_ctx);
         load_fonts(&cc.egui_ctx);
-        Self { snapshot, cmd_tx, demo_mode }
+        Self { snapshot, cmd_tx, demo_mode, wallet_ui: WalletUiState::default() }
     }
 }
 
@@ -39,7 +41,7 @@ impl eframe::App for QuickdrawApp {
         egui::CentralPanel::default()
             .frame(egui::Frame::none().fill(egui::Color32::from_rgb(0x18, 0x18, 0x18)))
             .show(ctx, |ui| {
-                draw_panel_content(ui, &snap, &self.cmd_tx);
+                draw_panel_content(ui, &snap, &self.cmd_tx, &mut self.wallet_ui, ctx);
             });
 
         // ── Token popup — deferred viewport, positioned at cursor ─────────────

@@ -5341,6 +5341,7 @@ dependencies = [
  "dotenvy",
  "eframe",
  "egui",
+ "open",
  "quickdraw-ai",
  "quickdraw-core",
  "quickdraw-defi",

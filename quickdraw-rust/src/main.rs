@@ -117,6 +117,10 @@ fn main() -> Result<()> {
     let cmd_tx_host = cmd_tx.clone();
     rt.spawn(host_socket_task(cmd_tx_host));
 
+    // ── Reown auth callback server (localhost:9427) ───────────────────────────
+    let cmd_tx_auth = cmd_tx.clone();
+    rt.spawn(auth_callback_server(cmd_tx_auth));
+
     // ── Engine ───────────────────────────────────────────────────────────────
     let snap_engine   = snapshot.clone();
     let repaint_engine = repaint_tx.clone();
@@ -378,6 +382,15 @@ fn dispatch_effect(
             });
         }
 
+        SideEffect::OpenWalletConnect => {
+            let worker_url = std::env::var("WORKER_URL").unwrap_or_default();
+            if !worker_url.is_empty() {
+                open_reown_auth_browser(&worker_url);
+            } else {
+                warn!("WORKER_URL not set — cannot open Reown auth");
+            }
+        }
+
         SideEffect::ShowOverlay { .. } | SideEffect::DismissOverlay => {
             // Already handled by FSM state — snapshot was published above
             let _ = repaint_tx.send(());
@@ -605,5 +618,76 @@ fn host_socket_path() -> std::path::PathBuf {
                 .join(".config")
         });
     base.join("quickdraw").join("host.sock")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Reown auth callback server
+//
+// Flow: UI opens browser → WORKER_URL/auth?callback=http://localhost:9427
+//       User logs in with email via Reown AppKit
+//       Browser GETs http://localhost:9427/callback?address=<pubkey>
+//       We fire Command::WalletConnected(pubkey)
+// ─────────────────────────────────────────────────────────────────────────────
+
+const AUTH_CALLBACK_PORT: u16 = 9427;
+
+async fn auth_callback_server(cmd_tx: mpsc::Sender<Command>) {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
+
+    let listener = match TcpListener::bind(("127.0.0.1", AUTH_CALLBACK_PORT)).await {
+        Ok(l) => { info!("Reown auth callback listening on port {AUTH_CALLBACK_PORT}"); l }
+        Err(e) => { warn!("could not bind auth callback port: {e}"); return; }
+    };
+
+    loop {
+        let Ok((mut stream, _)) = listener.accept().await else { continue };
+        let cmd_tx = cmd_tx.clone();
+
+        tokio::spawn(async move {
+            let mut buf = vec![0u8; 1024];
+            let n = stream.read(&mut buf).await.unwrap_or(0);
+            let req = String::from_utf8_lossy(&buf[..n]);
+
+            // Parse "GET /callback?address=<pubkey> HTTP/1.1"
+            let address = req
+                .lines()
+                .next()
+                .and_then(|line| line.split_whitespace().nth(1))
+                .and_then(|path| path.strip_prefix("/callback?address="))
+                .and_then(|addr| addr.split('&').next())
+                .and_then(|addr| addr.parse::<Pubkey>().ok());
+
+            let (status, body) = if let Some(pubkey) = address {
+                info!("Reown auth: wallet connected {pubkey}");
+                let _ = cmd_tx.send(Command::WalletConnected(pubkey)).await;
+                ("200 OK", "Connected! You can close this tab.")
+            } else {
+                ("400 Bad Request", "Missing or invalid address.")
+            };
+
+            // Minimal HTTP response with CORS so the browser page can fetch it
+            let response = format!(
+                "HTTP/1.1 {status}\r\nContent-Type: text/plain\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: {}\r\n\r\n{body}",
+                body.len()
+            );
+            let _ = stream.write_all(response.as_bytes()).await;
+        });
+    }
+}
+
+/// Called by the engine when Command::ConnectWallet is received.
+/// Opens the system browser to the Reown auth page.
+pub fn open_reown_auth_browser(worker_url: &str) {
+    let project_id = std::env::var("REOWN_PROJECT_ID").unwrap_or_default();
+    let callback   = format!("http://127.0.0.1:{AUTH_CALLBACK_PORT}");
+    // Use dedicated Pages site for auth (avoids HMAC/routing complexity in the Worker)
+    let auth_base  = std::env::var("REOWN_AUTH_URL")
+        .unwrap_or_else(|_| format!("{worker_url}/auth"));
+    let url = format!("{auth_base}?projectId={project_id}&callback={callback}");
+    info!("Opening Reown auth: {url}");
+    if let Err(e) = open::that(&url) {
+        warn!("could not open browser: {e}");
+    }
 }
 
