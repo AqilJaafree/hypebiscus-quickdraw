@@ -2,14 +2,53 @@ import { createAppKit } from '@reown/appkit'
 import { SolanaAdapter } from '@reown/appkit-adapter-solana'
 import { solana, solanaDevnet } from '@reown/appkit/networks'
 
-// Read projectId and callback from URL query params
-const params = new URLSearchParams(window.location.search)
-const projectId = params.get('projectId') || ''
-const callbackUrl = params.get('callback') || ''
+// Configuration
+const DEFAULT_PROJECT_ID = '05424f6cd27ac7b724d370c8bc452763'
+const REDIRECT_DELAY_MS = 800
+const SUCCESS_COLOR = '#8bf542'
 
-if (!projectId) {
-  document.getElementById('status').textContent = 'Missing projectId param.'
-} else {
+// Extract URL parameters
+const params = new URLSearchParams(window.location.search)
+const projectId = params.get('projectId') ?? DEFAULT_PROJECT_ID
+const callbackUrl = params.get('callback') ?? ''
+
+// Utility: Format wallet address for display
+function formatAddress(address) {
+  return `${address.slice(0, 6)}…${address.slice(-4)}`
+}
+
+// Utility: Update status UI
+function updateStatus(message, color = '#fff') {
+  const statusEl = document.getElementById('status')
+  if (statusEl) {
+    statusEl.textContent = message
+    statusEl.style.color = color
+  }
+}
+
+// Utility: Redirect to callback with wallet address
+function sendWalletCallback(address) {
+  if (!callbackUrl) return
+
+  const url = `${callbackUrl}/callback?address=${encodeURIComponent(address)}`
+
+  // Use navigation instead of fetch — ad blockers can't block window.location
+  setTimeout(() => {
+    window.location.href = url
+  }, REDIRECT_DELAY_MS)
+}
+
+// Handle account connection
+function handleAccountChange(account) {
+  if (!account?.address) return
+
+  const address = account.address
+  updateStatus(`✓ Connected: ${formatAddress(address)}`, SUCCESS_COLOR)
+  sendWalletCallback(address)
+}
+
+// Initialize Reown AppKit
+function initializeWallet() {
   const solanaAdapter = new SolanaAdapter()
 
   const modal = createAppKit({
@@ -29,17 +68,11 @@ if (!projectId) {
     },
   })
 
-  modal.subscribeAccount(account => {
-    if (!account?.address) return
-    const addr = account.address
-    const status = document.getElementById('status')
-    status.textContent = '✓ Connected: ' + addr.slice(0, 6) + '…' + addr.slice(-4)
-    status.style.color = '#8bf542'
-    if (callbackUrl) {
-      fetch(callbackUrl + '/callback?address=' + encodeURIComponent(addr)).catch(() => {})
-      setTimeout(() => window.close(), 1500)
-    }
-  })
+  modal.subscribeAccount(handleAccountChange)
 
-  modal.open()
+  // Auto-open modal after AppKit finishes mounting custom elements
+  requestAnimationFrame(() => modal.open())
 }
+
+// Bootstrap
+initializeWallet()

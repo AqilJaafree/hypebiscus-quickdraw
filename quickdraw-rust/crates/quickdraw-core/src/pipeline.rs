@@ -28,6 +28,11 @@ pub fn process(state: &mut AppState, cmd: Command) -> Vec<SideEffect> {
             let address = event.address;
             let position = event.position;
 
+            // Don't pop up for the user's own wallet address
+            if state.wallet_pubkey == Some(address) {
+                return vec![];
+            }
+
             state.fsm = QuickdrawState::TokenDetected {
                 address,
                 position,
