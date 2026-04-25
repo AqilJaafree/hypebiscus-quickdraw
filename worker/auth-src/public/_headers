@@ -1,0 +1,2 @@
+/*
+  Content-Security-Policy: default-src 'self' https: wss:; script-src 'self' 'unsafe-eval' 'unsafe-inline' https:; style-src 'self' 'unsafe-inline' https:; img-src 'self' data: https:; connect-src 'self' https: wss: http://127.0.0.1:9427;
