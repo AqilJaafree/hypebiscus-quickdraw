@@ -8,6 +8,7 @@ quickdraw-core = { path = "../quickdraw-core" }
 quickdraw-defi = { path = "../quickdraw-defi" }
 eframe         = { workspace = true }
 egui           = { workspace = true }
+egui-phosphor  = { workspace = true }
 egui_plot      = { workspace = true }
 tokio          = { workspace = true }
 serde          = { workspace = true }

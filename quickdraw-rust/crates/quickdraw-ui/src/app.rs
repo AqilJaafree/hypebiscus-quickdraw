@@ -1,4 +1,5 @@
 use std::sync::{Arc, RwLock};
+use std::sync::atomic::{AtomicBool, Ordering};
 use egui::{Margin, Rounding, Stroke};
 use tokio::sync::mpsc;
 
@@ -9,12 +10,15 @@ use crate::wallet_ui::WalletUiState;
 use crate::header;
 
 /// Main window = settings panel (always visible on startup).
-/// Token popup = deferred viewport that appears near cursor on detection.
+/// Token popup  = deferred viewport that appears near cursor on detection.
+/// Swap popup   = second deferred viewport below the token popup, opens on BUY.
 pub struct QuickdrawApp {
-    snapshot:   Arc<RwLock<AppSnapshot>>,
-    cmd_tx:     mpsc::Sender<Command>,
-    demo_mode:  bool,
-    wallet_ui:  WalletUiState,
+    snapshot:      Arc<RwLock<AppSnapshot>>,
+    cmd_tx:        mpsc::Sender<Command>,
+    demo_mode:     bool,
+    wallet_ui:     WalletUiState,
+    swap_open:     Arc<AtomicBool>,
+    swap_anchored: Arc<AtomicBool>, // true after swap popup has been positioned once
 }
 
 impl QuickdrawApp {
@@ -26,7 +30,14 @@ impl QuickdrawApp {
     ) -> Self {
         apply_neobrutalism_theme(&cc.egui_ctx);
         load_fonts(&cc.egui_ctx);
-        Self { snapshot, cmd_tx, demo_mode, wallet_ui: WalletUiState::default() }
+        Self {
+            snapshot,
+            cmd_tx,
+            demo_mode,
+            wallet_ui:     WalletUiState::default(),
+            swap_open:     Arc::new(AtomicBool::new(false)),
+            swap_anchored: Arc::new(AtomicBool::new(false)),
+        }
     }
 }
 
@@ -34,30 +45,41 @@ impl eframe::App for QuickdrawApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         let snap = self.snapshot.read().unwrap().clone();
 
-        // Main window always repaints (session timer ticks)
         ctx.request_repaint_after(std::time::Duration::from_secs(1));
 
-        // ── Settings panel — main window content ─────────────────────────────
+        // Reset swap state when the token overlay is not visible
+        if !snap.overlay_visible {
+            self.swap_open.store(false, Ordering::Relaxed);
+            self.swap_anchored.store(false, Ordering::Relaxed);
+        }
+
         egui::CentralPanel::default()
             .frame(egui::Frame::none().fill(egui::Color32::from_rgb(0x18, 0x18, 0x18)))
             .show(ctx, |ui| {
                 draw_panel_content(ui, &snap, &self.cmd_tx, &mut self.wallet_ui, ctx);
             });
 
-        // ── Token popup — deferred viewport, positioned at cursor ─────────────
-        show_token_popup(ctx, self.snapshot.clone(), self.cmd_tx.clone(), self.demo_mode);
+        show_token_popup(ctx, &snap, self.snapshot.clone(), self.cmd_tx.clone(), self.demo_mode, self.swap_open.clone());
+        show_swap_popup(ctx, &snap, self.snapshot.clone(), self.cmd_tx.clone(), self.swap_open.clone(), self.swap_anchored.clone());
     }
 }
 
 // ─────────────────────────── Token popup viewport ────────────────────────────
 
+thread_local! {
+    static SHOWN_AT: std::cell::Cell<Option<std::time::Instant>>
+        = std::cell::Cell::new(None);
+    static PREV_AI: std::cell::Cell<bool> = std::cell::Cell::new(false);
+}
+
 fn show_token_popup(
     ctx: &egui::Context,
+    snap: &AppSnapshot,
     snapshot: Arc<RwLock<AppSnapshot>>,
     cmd_tx: mpsc::Sender<Command>,
     demo_mode: bool,
+    swap_open: Arc<AtomicBool>,
 ) {
-    let snap = snapshot.read().unwrap().clone();
     if !snap.overlay_visible { return; }
 
     let pos_x = snap.overlay_position.x + 20.0;
@@ -78,22 +100,9 @@ fn show_token_popup(
         move |ctx, _| {
             let snap = snapshot.read().unwrap().clone();
 
-            // Close when dismissed
             if !snap.overlay_visible {
                 ctx.send_viewport_cmd(egui::ViewportCommand::Close);
                 return;
-            }
-
-            // Resize as data arrives
-            ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(
-                egui::vec2(Tokens::POPUP_WIDTH, popup_height(&snap))
-            ));
-
-            // Auto-dismiss timer (reset when AI narration arrives)
-            thread_local! {
-                static SHOWN_AT: std::cell::Cell<Option<std::time::Instant>>
-                    = std::cell::Cell::new(None);
-                static PREV_AI: std::cell::Cell<bool> = std::cell::Cell::new(false);
             }
 
             if SHOWN_AT.with(|t| t.get()).is_none() {
@@ -110,50 +119,182 @@ fn show_token_popup(
                 t.get().map(|i| i.elapsed().as_secs_f32()).unwrap_or(0.0)
             });
 
-            if !demo_mode && elapsed >= 12.0 {
-                // Reset timer state for next popup
+            // Don't auto-dismiss while the user is interacting with the swap panel
+            let swap_is_open = swap_open.load(Ordering::Relaxed);
+            if !demo_mode && elapsed >= POPUP_DURATION && !swap_is_open {
                 SHOWN_AT.with(|t| t.set(None));
                 PREV_AI.with(|t| t.set(false));
                 let _ = cmd_tx.try_send(Command::DismissOverlay);
                 return;
             }
 
-            ctx.request_repaint_after(std::time::Duration::from_millis(80));
+            if snap.ai_streaming {
+                ctx.request_repaint_after(std::time::Duration::from_millis(80));
+            } else {
+                ctx.request_repaint_after(std::time::Duration::from_millis(500));
+            }
 
             egui::CentralPanel::default()
                 .frame(egui::Frame::none().fill(Colors::OVERLAY_BG))
                 .show(ctx, |ui| {
-                    show_popup(ui, &snap, &cmd_tx);
+                    show_popup(ui, &snap, &cmd_tx, elapsed, &swap_open);
                     if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+                        swap_open.store(false, Ordering::Relaxed);
                         let _ = cmd_tx.try_send(Command::DismissOverlay);
                     }
                 });
+
+            // Resize to actual content — eliminates blank space and clips nothing.
+            let used_h = ctx.used_rect().height();
+            if used_h > 10.0 {
+                ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(
+                    egui::vec2(Tokens::POPUP_WIDTH, used_h)
+                ));
+            }
         },
     );
 }
 
-fn popup_height(snap: &AppSnapshot) -> f32 {
-    const HEADER_H: f32      = 54.0;
-    const PRICE_H: f32       = 46.0;
-    const AI_PAD: f32        = 14.0;
-    const LINE_H: f32        = 16.0;
-    const CHARS_PER_LINE: usize = 33;
+// ─────────────────────────── Swap popup viewport ─────────────────────────────
 
-    if snap.safety_report.is_none() { return Tokens::POPUP_H_LOADING; }
-
-    if let Some(ref n) = snap.ai_narration {
-        let lines = ((n.len() + CHARS_PER_LINE - 1) / CHARS_PER_LINE).max(1) as f32;
-        (HEADER_H + PRICE_H + lines * LINE_H + AI_PAD).min(320.0)
-    } else if snap.ai_streaming {
-        HEADER_H + PRICE_H + LINE_H + AI_PAD
-    } else {
-        Tokens::POPUP_H_FULL
+fn show_swap_popup(
+    ctx: &egui::Context,
+    snap: &AppSnapshot,
+    snapshot: Arc<RwLock<AppSnapshot>>,
+    cmd_tx: mpsc::Sender<Command>,
+    swap_open: Arc<AtomicBool>,
+    swap_anchored: Arc<AtomicBool>,
+) {
+    if !swap_open.load(Ordering::Relaxed) {
+        swap_anchored.store(false, Ordering::Relaxed);
+        return;
     }
+
+    if !snap.overlay_visible { return; }
+
+    let swap_h = 220.0; // tight initial estimate; dynamic InnerSize corrects each frame
+
+    // Set position only on the first open — after that the OS / user controls it
+    let already_anchored = swap_anchored.swap(true, Ordering::Relaxed);
+    let pos_x = snap.overlay_position.x + 20.0;
+    let pos_y = snap.overlay_position.y + 10.0 + popup_height(&snap) + 6.0;
+
+    let mut builder = egui::ViewportBuilder::default()
+        .with_title("Quickdraw Swap")
+        .with_inner_size([Tokens::POPUP_WIDTH, swap_h])
+        .with_resizable(false)
+        .with_decorations(false)
+        .with_window_level(egui::WindowLevel::AlwaysOnTop);
+
+    if !already_anchored {
+        builder = builder.with_position([pos_x, pos_y]);
+    }
+
+    ctx.show_viewport_deferred(
+        egui::ViewportId::from_hash_of("quickdraw_swap"),
+        builder,
+        move |ctx, _| {
+            let snap = snapshot.read().unwrap().clone();
+
+            if !snap.overlay_visible || !swap_open.load(Ordering::Relaxed) {
+                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                return;
+            }
+
+            ctx.request_repaint_after(std::time::Duration::from_millis(500));
+
+            egui::CentralPanel::default()
+                .frame(egui::Frame::none().fill(egui::Color32::from_rgb(0x0D, 0x0D, 0x0D)))
+                .show(ctx, |ui| {
+                    crate::swap_ui::show_swap_panel(ui, &snap, &cmd_tx);
+
+                    // Thin divider
+                    let w = ui.available_width();
+                    let (line_rect, _) = ui.allocate_exact_size(
+                        egui::vec2(w, 1.0), egui::Sense::hover()
+                    );
+                    ui.painter().hline(
+                        line_rect.x_range(),
+                        line_rect.center().y,
+                        Stroke::new(1.0, egui::Color32::from_rgb(0x1e, 0x1e, 0x1e)),
+                    );
+
+                    // X CANCEL — 12px side margins to align with swap panel body content
+                    egui::Frame::none()
+                        .inner_margin(Margin { left: 12.0, right: 12.0, top: 0.0, bottom: 0.0 })
+                        .show(ui, |ui| {
+                            if ui.add_sized(
+                                egui::vec2(ui.available_width(), 28.0),
+                                egui::Button::new(
+                                    egui::RichText::new("X  CANCEL")
+                                        .size(10.0).strong().monospace()
+                                        .color(egui::Color32::from_rgb(0x99, 0x99, 0x99))
+                                )
+                                .fill(egui::Color32::from_rgb(0x1a, 0x1a, 0x1a))
+                                .stroke(Stroke::new(1.0, egui::Color32::from_rgb(0x33, 0x33, 0x33)))
+                                .rounding(Rounding::ZERO),
+                            ).clicked() {
+                                swap_open.store(false, Ordering::Relaxed);
+                            }
+                        });
+
+                    let r = ctx.screen_rect();
+                    ui.painter().rect_stroke(r, 0.0, Stroke::new(2.0, egui::Color32::BLACK));
+                });
+
+            // Resize to actual content — eliminates blank space below X CANCEL.
+            let used_h = ctx.used_rect().height();
+            if used_h > 10.0 {
+                ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(
+                    egui::vec2(Tokens::POPUP_WIDTH, used_h)
+                ));
+            }
+        },
+    );
 }
 
-fn show_popup(ui: &mut egui::Ui, snap: &AppSnapshot, cmd_tx: &mpsc::Sender<Command>) {
-    let loading = snap.safety_report.is_none();
-    let score   = snap.safety_report.as_ref().map(|r| r.score).unwrap_or(0);
+// ─────────────────────────── Popup layout helpers ────────────────────────────
+
+const POPUP_DURATION: f32 = 12.0;
+const BUY_BTN_H: f32     = 34.0;
+
+fn popup_height(snap: &AppSnapshot) -> f32 {
+    const HEADER_H: f32         = 54.0;
+    const PRICE_H: f32          = 36.0;  // 8 top margin + ~18px label + 10 bottom margin
+    const AI_PAD: f32           = 16.0;  // 6 top + 8 bottom + 2 buffer
+    const LINE_H: f32           = 14.0;  // SpaceMono 11pt row height ≈ 13.5px
+    const CHARS_PER_LINE: usize = 36;    // SpaceMono 11pt at 238px available ≈ 36 chars/line
+    const EXTRA_PAD: f32        = 10.0;  // small safety buffer
+
+    let content_h = if snap.safety_report.is_none() {
+        Tokens::POPUP_H_LOADING
+    } else if let Some(ref n) = snap.ai_narration {
+        // Count per \n-segment: each segment may wrap independently.
+        // This avoids double-counting char_lines + nl_lines.
+        let lines: usize = n.split('\n')
+            .map(|seg| ((seg.len() + CHARS_PER_LINE - 1) / CHARS_PER_LINE).max(1))
+            .sum();
+        (HEADER_H + PRICE_H + lines as f32 * LINE_H + AI_PAD).min(420.0)
+    } else if snap.ai_streaming {
+        HEADER_H + PRICE_H + LINE_H * 2.0 + AI_PAD
+    } else {
+        Tokens::POPUP_H_FULL
+    };
+
+    // BUY/CANCEL row matches the price row — both safety and price must be loaded
+    let btn_h = if snap.safety_report.is_some() && snap.token_price.is_some() { 1.0 + BUY_BTN_H } else { 0.0 };
+    content_h + btn_h + EXTRA_PAD
+}
+
+fn show_popup(
+    ui: &mut egui::Ui,
+    snap: &AppSnapshot,
+    cmd_tx: &mpsc::Sender<Command>,
+    _elapsed: f32,
+    swap_open: &Arc<AtomicBool>,
+) {
+    let loading      = snap.safety_report.is_none();
+    let score        = snap.safety_report.as_ref().map(|r| r.score).unwrap_or(0);
     let header_color = if loading {
         egui::Color32::from_rgb(0x1E, 0x1E, 0x1E)
     } else {
@@ -167,12 +308,18 @@ fn show_popup(ui: &mut egui::Ui, snap: &AppSnapshot, cmd_tx: &mpsc::Sender<Comma
         .fill(Colors::OVERLAY_BG)
         .inner_margin(Margin::ZERO)
         .show(ui, |ui| {
-            // Drag zone (left 70%, registered before buttons for correct priority)
+            // Drag zone — same Wayland serial fix as swap panel: check pointer
+            // position directly on the press frame, don't wait for drag threshold.
             let drag_rect = egui::Rect::from_min_size(
                 ui.cursor().min,
                 egui::vec2(Tokens::POPUP_WIDTH * 0.70, 65.0),
             );
-            if ui.interact(drag_rect, egui::Id::new("popup_drag"), egui::Sense::drag()).drag_started() {
+            let in_zone = ui.input(|i| {
+                i.pointer.hover_pos().map_or(false, |p| drag_rect.contains(p))
+            });
+            let just_pressed = ui.input(|i| i.pointer.primary_pressed());
+            let dr = ui.interact(drag_rect, egui::Id::new("popup_drag"), egui::Sense::drag());
+            if (in_zone && just_pressed) || dr.drag_started() {
                 ui.ctx().send_viewport_cmd(egui::ViewportCommand::StartDrag);
             }
 
@@ -186,7 +333,7 @@ fn show_popup(ui: &mut egui::Ui, snap: &AppSnapshot, cmd_tx: &mpsc::Sender<Comma
                     if loading {
                         ui.label(egui::RichText::new("Fetching…").size(12.0).monospace().color(egui::Color32::WHITE));
                     } else if let Some(price) = &snap.token_price {
-                        let up = price.change_24h_pct >= 0.0;
+                        let up    = price.change_24h_pct >= 0.0;
                         let arrow = if up { "▲" } else { "▼" };
                         let ccol  = if up { Colors::SAFE } else { Colors::DANGER };
                         ui.horizontal(|ui| {
@@ -216,6 +363,53 @@ fn show_popup(ui: &mut egui::Ui, snap: &AppSnapshot, cmd_tx: &mpsc::Sender<Comma
                     });
             }
         });
+
+    // ── BUY / CANCEL row — same condition as price row ───────────────────────
+    if snap.safety_report.is_some() && snap.token_price.is_some() {
+        let buy_color  = Colors::safety_color(score);
+        let text_color = if score < 50 { egui::Color32::WHITE } else { egui::Color32::BLACK };
+        let w = ui.available_width();
+
+        // 1px dark divider (no egui spacing overhead)
+        let (line_rect, _) = ui.allocate_exact_size(egui::vec2(w, 1.0), egui::Sense::hover());
+        ui.painter().hline(
+            line_rect.x_range(),
+            line_rect.center().y,
+            Stroke::new(1.0, egui::Color32::from_rgb(0x1e, 0x1e, 0x1e)),
+        );
+
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 0.0;
+            let half = w / 2.0;
+
+            let buy_resp = ui.add_sized(
+                egui::vec2(half, BUY_BTN_H),
+                egui::Button::new(
+                    egui::RichText::new("BUY").size(11.0).strong().monospace().color(text_color)
+                )
+                .fill(buy_color)
+                .stroke(Stroke::NONE)
+                .rounding(Rounding::ZERO),
+            );
+            let cancel_resp = ui.add_sized(
+                egui::vec2(half, BUY_BTN_H),
+                egui::Button::new(
+                    egui::RichText::new("CANCEL").size(11.0).strong().monospace()
+                        .color(egui::Color32::from_rgb(0x99, 0x99, 0x99))
+                )
+                .fill(egui::Color32::from_rgb(0x28, 0x28, 0x28))
+                .stroke(Stroke::new(1.0, egui::Color32::from_rgb(0x44, 0x44, 0x44)))
+                .rounding(Rounding::ZERO),
+            );
+
+            if buy_resp.clicked() {
+                swap_open.store(true, Ordering::Relaxed);
+            }
+            if cancel_resp.clicked() {
+                let _ = cmd_tx.try_send(Command::DismissOverlay);
+            }
+        });
+    }
 
     let r = ui.ctx().screen_rect();
     ui.painter().rect_stroke(r, 0.0, egui::Stroke::new(2.0, egui::Color32::BLACK));
@@ -262,6 +456,8 @@ fn load_fonts(ctx: &egui::Context) {
         egui::FontData::from_static(include_bytes!("../../../assets/SpaceMono-Bold.ttf")).into());
     fonts.families.entry(egui::FontFamily::Proportional).or_default().insert(0, "SpaceMonoBold".into());
     fonts.families.entry(egui::FontFamily::Monospace).or_default().insert(0, "SpaceMono".into());
+    // Phosphor icon font — renders crisp at small sizes unlike capital letters
+    egui_phosphor::add_to_fonts(&mut fonts, egui_phosphor::Variant::Regular);
     ctx.set_fonts(fonts);
 }
 

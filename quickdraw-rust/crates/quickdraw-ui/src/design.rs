@@ -1,4 +1,4 @@
-use egui::{Color32, FontFamily, FontId, RichText, Vec2};
+use egui::{Color32, RichText, Vec2};
 
 pub struct Colors;
 
@@ -50,8 +50,6 @@ impl Tokens {
     pub const POPUP_WIDTH: f32        = 260.0;
     pub const POPUP_H_LOADING: f32    = 75.0;
     pub const POPUP_H_FULL: f32       = 100.0;
-    pub const POPUP_H_WITH_AI: f32    = 162.0;
-    pub const OVERLAY_WIDTH: f32      = 340.0; // old overlay, unused now
 
     // Settings panel
     pub const PANEL_WIDTH: f32     = 260.0;

@@ -1,0 +1,982 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Quickdraw — Wireframes</title>
+<link href="https://fonts.googleapis.com/css2?family=Caveat:wght@400;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<script type="text/babel" src="design-canvas.jsx"></script>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #1a1a1a; font-family: 'Caveat', cursive; }
+
+  /* Wireframe base styles */
+  .wf {
+    font-family: 'Caveat', cursive;
+    background: #f7f4ee;
+    position: relative;
+  }
+  .wf * { font-family: 'Caveat', cursive; }
+  .wf-border { border: 2px solid #333; }
+  .wf-shadow { box-shadow: 3px 3px 0 #333; }
+  .wf-bold { font-weight: 700; }
+  .mono { font-family: 'Space Mono', monospace; font-size: 10px; }
+
+  :root {
+    --accent-yellow: #f5e642;
+    --accent-lime: #8bf542;
+    --accent-cyan: #42e8f5;
+    --accent-red: #f54242;
+    --ui-scale: 1;
+    --annot-color: #cc2200;
+  }
+
+  /* Sketch fills */
+  .fill-dark { background: #2a2a2a; color: #eee; }
+  .fill-light { background: #f0ece0; }
+  .fill-yellow { background: var(--accent-yellow); color: #111; }
+  .fill-cyan { background: var(--accent-cyan); color: #111; }
+  .fill-lime { background: var(--accent-lime); color: #111; }
+  .fill-red { background: var(--accent-red); color: #fff; }
+  .fill-amber { background: #f5c842; color: #111; }
+  .fill-mid { background: #ddd; }
+  .fill-stripe { background: repeating-linear-gradient(45deg, #e8e4d8, #e8e4d8 4px, #f0ece0 4px, #f0ece0 10px); }
+
+  .label-muted { color: #888; font-size: 11px; }
+  .label-tiny { color: #aaa; font-size: 9px; font-family: 'Space Mono', monospace; }
+
+  /* Separator */
+  .sep { border-top: 1.5px solid #bbb; margin: 0; }
+  .sep-dark { border-top: 1.5px solid #444; }
+
+  /* Annotation */
+  .annot {
+    position: absolute;
+    font-size: 13px;
+    color: #c00;
+    font-family: 'Caveat', cursive;
+    pointer-events: none;
+    white-space: nowrap;
+    line-height: 1.5;
+  }
+  .annot-line {
+    position: absolute;
+    border-top: 1px dashed #c00;
+    pointer-events: none;
+  }
+
+  /* Countdown bar */
+  .countdown { height: 3px; background: #ccc; position: relative; overflow: hidden; }
+  .countdown-fill { height: 100%; width: 60%; }
+
+  /* Score block */
+  .score-block {
+    width: 52px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    border: 2px solid #333;
+    box-shadow: 3px 3px 0 #333;
+    padding: 4px 2px;
+    flex-shrink: 0;
+  }
+  .score-num { font-size: 22px; font-weight: 700; line-height: 1; font-family: 'Space Mono', monospace; }
+  .score-label { font-size: 9px; font-weight: 700; letter-spacing: 0.05em; font-family: 'Space Mono', monospace; margin-top: 2px; }
+
+  /* Pill tag */
+  .pill {
+    display: inline-block;
+    padding: 1px 6px;
+    font-size: 11px;
+    font-weight: 700;
+    border: 1.5px solid #333;
+    font-family: 'Space Mono', monospace;
+  }
+
+  /* Action button */
+  .act-btn {
+    padding: 4px 10px;
+    font-size: 12px;
+    font-weight: 700;
+    border: 2px solid #333;
+    cursor: pointer;
+    font-family: 'Caveat', cursive;
+    letter-spacing: 0.02em;
+  }
+
+  /* Toggle group */
+  .toggle-group { display: flex; gap: 2px; }
+  .toggle-btn {
+    flex: 1;
+    padding: 4px 6px;
+    font-size: 12px;
+    font-weight: 700;
+    border: 1.5px solid #333;
+    text-align: center;
+    font-family: 'Caveat', cursive;
+  }
+  .toggle-btn.active { background: #f5e642; }
+  .toggle-btn.inactive { background: #ddd; color: #777; border-color: #aaa; }
+
+  /* Stat row */
+  .stat-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 3px 0;
+    font-size: 13px;
+  }
+  .stat-val { font-family: 'Space Mono', monospace; font-size: 11px; font-weight: 700; }
+
+  /* Left accent stripe */
+  .accent-stripe {
+    position: absolute;
+    left: 0; top: 0; bottom: 0;
+    width: 4px;
+  }
+
+  /* Section label */
+  .section-label {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    color: #888;
+    text-transform: uppercase;
+    font-family: 'Space Mono', monospace;
+    margin-bottom: 5px;
+  }
+
+  /* Slide states */
+  .state-tag {
+    position: absolute;
+    top: -18px;
+    left: 0;
+    font-size: 10px;
+    color: #888;
+    font-family: 'Caveat', cursive;
+  }
+
+  /* Variant label */
+  .variant-label {
+    font-family: 'Caveat', cursive;
+    font-size: 15px;
+    color: #555;
+    margin-bottom: 8px;
+    font-weight: 700;
+  }
+
+  /* Cursor ghost */
+  .cursor-ghost {
+    width: 12px; height: 12px;
+    border-left: 2px solid #333;
+    border-top: 2px solid #333;
+    clip-path: polygon(0 0, 100% 0, 0 100%);
+    background: #fff;
+    border: none;
+    display: inline-block;
+  }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+/* ── LOADING STATES ── */
+const PopupLoading = () => (
+  <div className="wf wf-border wf-shadow fill-dark" style={{ width: 260, position: 'relative', overflow: 'hidden' }}>
+    <div className="accent-stripe" style={{ background: '#444' }} />
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '7px 10px 7px 14px', borderBottom: '1px solid #2e2e2e' }}>
+      <span style={{ fontSize: 11, fontWeight: 700, color: '#f5e642', fontFamily: 'Space Mono' }}>⚡ QUICKDRAW</span>
+      <div style={{ display: 'flex', gap: 8 }}>
+        <span style={{ fontSize: 12, color: '#555' }}>⚙</span>
+        <span style={{ fontSize: 12, color: '#555' }}>✕</span>
+      </div>
+    </div>
+    <div style={{ display: 'flex', gap: 12, padding: '10px 12px 10px 14px', alignItems: 'center' }}>
+      <div className="score-block" style={{ background: '#333' }}>
+        <span className="score-num" style={{ color: '#666' }}>?</span>
+        <span className="score-label" style={{ color: '#555' }}>…</span>
+      </div>
+      <div style={{ flex: 1 }}>
+        <div style={{ fontSize: 16, fontWeight: 700, color: '#555', fontFamily: 'Space Mono', lineHeight: 1 }}>BONK</div>
+        <div style={{ fontSize: 12, color: '#444', marginTop: 4, fontFamily: 'Space Mono' }}>Fetching…</div>
+      </div>
+    </div>
+    <div className="countdown" style={{ background: '#2a2a2a' }}>
+      <div className="countdown-fill" style={{ background: '#555', width: '90%' }} />
+    </div>
+  </div>
+);
+
+/* ── SETTINGS PANEL VARIANTS ── */
+const { useState, useEffect, useRef } = React;
+
+/* ── Sketch helpers ── */
+const Hatch = ({ w = 80, h = 40, label = '' }) => (
+  <div style={{
+    width: w, height: h,
+    background: 'repeating-linear-gradient(45deg,#ddd,#ddd 3px,#f0ece0 3px,#f0ece0 9px)',
+    border: '1.5px dashed #aaa',
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    flexShrink: 0,
+  }}>
+    {label && <span style={{ fontSize: 9, color: '#888', fontFamily: 'Space Mono', textAlign: 'center', padding: 2 }}>{label}</span>}
+  </div>
+);
+
+const Annot = ({ children, style = {} }) => (
+  <div style={{ fontSize: 10, color: '#c44', fontFamily: 'Caveat', lineHeight: 1.3, ...style }}>
+    {children}
+  </div>
+);
+
+/* ── TOKEN POPUP VARIANTS ── */
+
+// V1: Canonical — score block + ticker + price
+const PopupV1 = ({ state = 'full', score = 82, scoreColor = '#8bf542', label = 'SAFE' }) => {
+  const loading = state === 'loading';
+  return (
+    <div className="wf wf-border wf-shadow fill-dark" style={{ width: 260, position: 'relative', overflow: 'hidden' }}>
+      <div className="accent-stripe" style={{ background: loading ? '#444' : scoreColor }} />
+      {/* Header */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '7px 10px 7px 14px', borderBottom: '1px solid #2e2e2e' }}>
+        <span style={{ fontSize: 11, fontWeight: 700, color: '#f5e642', letterSpacing: '0.06em', fontFamily: 'Space Mono' }}>⚡ QUICKDRAW</span>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <span style={{ fontSize: 12, color: '#888', cursor: 'pointer' }}>⚙</span>
+          <span style={{ fontSize: 12, color: '#888', cursor: 'pointer' }}>✕</span>
+        </div>
+      </div>
+      {/* Main row */}
+      <div style={{ display: 'flex', gap: 12, padding: '10px 12px 10px 14px', alignItems: 'center' }}>
+        <div className="score-block" style={{ background: loading ? '#444' : scoreColor }}>
+          <span className="score-num" style={{ color: '#111' }}>{loading ? '?' : score}</span>
+          <span className="score-label" style={{ color: '#111' }}>{loading ? '…' : label}</span>
+        </div>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontSize: 16, fontWeight: 700, color: '#fff', fontFamily: 'Space Mono', lineHeight: 1 }}>
+            {loading ? <span style={{ color: '#444' }}>…</span> : 'BONK'}
+          </div>
+          {loading ? (
+            <div style={{ fontSize: 12, color: '#444', marginTop: 4 }}>Fetching…</div>
+          ) : (
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginTop: 4 }}>
+              <span style={{ fontSize: 13, color: '#ccc', fontFamily: 'Space Mono' }}>$0.000021</span>
+              <span style={{ fontSize: 12, color: scoreColor, fontFamily: 'Space Mono', fontWeight: 700 }}>▲ 12.3%</span>
+            </div>
+          )}
+        </div>
+      </div>
+      {/* Countdown bar */}
+      <div className="countdown" style={{ background: '#2a2a2a' }}>
+        <div className="countdown-fill" style={{ background: loading ? '#555' : scoreColor, width: loading ? '92%' : '55%' }} />
+      </div>
+    </div>
+  );
+};
+
+// V2: Score right-aligned + ticker bold
+const PopupV2 = () => (
+  <div className="wf wf-border wf-shadow fill-dark" style={{ width: 260, position: 'relative' }}>
+    <div className="accent-stripe" style={{ background: '#8bf542' }} />
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '7px 10px 7px 14px', borderBottom: '1px solid #2e2e2e' }}>
+      <span style={{ fontSize: 11, fontWeight: 700, color: '#f5e642', fontFamily: 'Space Mono' }}>⚡ QUICKDRAW</span>
+      <div style={{ display: 'flex', gap: 8 }}>
+        <span style={{ fontSize: 12, color: '#888' }}>⚙</span>
+        <span style={{ fontSize: 12, color: '#888' }}>✕</span>
+      </div>
+    </div>
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 12px 10px 14px' }}>
+      <div>
+        <div style={{ fontSize: 18, fontWeight: 700, color: '#fff', fontFamily: 'Space Mono', lineHeight: 1 }}>BONK</div>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'baseline', marginTop: 4 }}>
+          <span style={{ fontSize: 12, color: '#ccc', fontFamily: 'Space Mono' }}>$0.000021</span>
+          <span style={{ fontSize: 11, color: '#8bf542', fontFamily: 'Space Mono', fontWeight: 700 }}>▲ 12.3%</span>
+        </div>
+      </div>
+      <div style={{ textAlign: 'right' }}>
+        <div style={{ fontSize: 26, fontWeight: 700, color: '#8bf542', fontFamily: 'Space Mono', lineHeight: 1 }}>82</div>
+        <div style={{ fontSize: 9, color: '#8bf542', fontFamily: 'Space Mono', letterSpacing: '0.05em', marginTop: 2 }}>SAFE</div>
+      </div>
+    </div>
+    <div className="countdown" style={{ background: '#2a2a2a' }}>
+      <div className="countdown-fill" style={{ background: '#8bf542', width: '55%' }} />
+    </div>
+  </div>
+);
+
+// V3: Score banner header — primary design direction
+const PopupV3 = ({ state = 'safe', score = 82, ticker = 'BONK', price = '$0.000021', change = '▲ 12.3%', showBuyToggle = false }) => {
+  const [buyOpen, setBuyOpen] = React.useState(false);
+  const loading = state === 'loading';
+  const colors = { safe: '#8bf542', caution: '#f5c842', danger: '#f54242', loading: '#222' };
+  const labels = { safe: 'SAFE', caution: 'CAUTION', danger: 'HIGH RISK', loading: '…' };
+  const scoreColor = colors[state] || '#8bf542';
+  const scoreLabel = labels[state] || 'SAFE';
+  const textColor = state === 'danger' ? '#fff' : '#111';
+  const changeColor = change.startsWith('▲') ? '#8bf542' : '#f54242';
+  const btnColor = state === 'danger' ? 'rgba(255,255,255,0.5)' : 'rgba(0,0,0,0.35)';
+  return (
+    <div className="wf wf-border wf-shadow fill-dark" style={{ width: 260, position: 'relative' }}>
+      {/* Score-first header — full width color block */}
+      <div style={{ background: loading ? '#1e1e1e' : scoreColor, padding: '10px 12px', display: 'flex', alignItems: 'center', gap: 10 }}>
+        <span style={{ fontSize: 34, fontWeight: 700, color: loading ? '#333' : textColor, fontFamily: 'Space Mono', lineHeight: 1, minWidth: 44 }}>
+          {loading ? '?' : score}
+        </span>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontSize: 9, fontWeight: 700, color: loading ? '#444' : (state === 'danger' ? 'rgba(255,255,255,0.6)' : 'rgba(0,0,0,0.45)'), fontFamily: 'Space Mono', letterSpacing: '0.08em' }}>{scoreLabel}</div>
+          <div style={{ fontSize: 17, fontWeight: 700, color: loading ? '#333' : textColor, fontFamily: 'Space Mono', lineHeight: 1.15, marginTop: 1 }}>{loading ? '———' : ticker}</div>
+        </div>
+        <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+          <span style={{ fontSize: 13, color: btnColor, cursor: 'pointer' }}>⚙</span>
+          <span style={{ fontSize: 13, color: btnColor, cursor: 'pointer' }}>✕</span>
+        </div>
+      </div>
+      {/* Price row */}
+      <div style={{ padding: '8px 12px 6px', display: 'flex', alignItems: 'center', gap: 10 }}>
+        {loading ? (
+          <span style={{ fontSize: 12, color: '#fff', fontFamily: 'Space Mono' }}>Fetching…</span>
+        ) : (
+          <>
+            <span style={{ fontSize: 13, color: '#fff', fontFamily: 'Space Mono', fontWeight: 700 }}>{price}</span>
+            <span style={{ fontSize: 12, color: state === 'danger' ? '#f54242' : changeColor, fontFamily: 'Space Mono', fontWeight: 700 }}>{change}</span>
+          </>
+        )}
+      </div>
+      {/* Action buttons row */}
+      {showBuyToggle && !loading && !buyOpen && (
+        <div style={{ display: 'flex', gap: 0, borderTop: '1px solid #1e1e1e' }}>
+          <button
+            onClick={() => setBuyOpen(true)}
+            style={{
+              flex: 1, padding: '8px 0', fontSize: 11, fontWeight: 700,
+              fontFamily: 'Space Mono', cursor: 'pointer', letterSpacing: '0.06em',
+              background: scoreColor, color: textColor,
+              border: 'none', borderRight: '1px solid #111',
+            }}
+          >BUY</button>
+          <button
+            style={{
+              flex: 1, padding: '8px 0', fontSize: 11, fontWeight: 700,
+              fontFamily: 'Space Mono', cursor: 'pointer', letterSpacing: '0.06em',
+              background: '#1a1a1a', color: '#fff',
+              border: 'none',
+            }}
+          >CANCEL</button>
+        </div>
+      )}
+      {/* Swap panel expands when BUY clicked */}
+      {showBuyToggle && buyOpen && (
+        <>
+          <div style={{ borderTop: '1px solid #1e1e1e' }}>
+            <SwapPanel state="ready" amount="0.5" compact />
+          </div>
+          <button
+            onClick={() => setBuyOpen(false)}
+            style={{
+              width: '100%', padding: '7px 0', fontSize: 10, fontWeight: 700,
+              fontFamily: 'Space Mono', cursor: 'pointer', letterSpacing: '0.06em',
+              background: '#1a1a1a', color: '#fff',
+              border: 'none', borderTop: '1px solid #1e1e1e',
+            }}
+          >✕ CANCEL</button>
+        </>
+      )}
+    </div>
+  );
+};
+
+// V4: DANGER state
+const PopupV4 = () => (
+  <div className="wf wf-border wf-shadow fill-dark" style={{ width: 260, position: 'relative', overflow: 'hidden' }}>
+    <div className="accent-stripe" style={{ background: '#f54242' }} />
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '7px 10px 7px 14px', borderBottom: '1px solid #2e2e2e' }}>
+      <span style={{ fontSize: 11, fontWeight: 700, color: '#f5e642', fontFamily: 'Space Mono' }}>⚡ QUICKDRAW</span>
+      <div style={{ display: 'flex', gap: 8 }}>
+        <span style={{ fontSize: 12, color: '#888' }}>⚙</span>
+        <span style={{ fontSize: 12, color: '#888' }}>✕</span>
+      </div>
+    </div>
+    <div style={{ display: 'flex', gap: 12, padding: '10px 12px 10px 14px', alignItems: 'center' }}>
+      <div className="score-block" style={{ background: '#f54242' }}>
+        <span className="score-num" style={{ color: '#fff' }}>21</span>
+        <span className="score-label" style={{ color: '#fff', fontSize: 7 }}>HIGH RISK</span>
+      </div>
+      <div style={{ flex: 1 }}>
+        <div style={{ fontSize: 16, fontWeight: 700, color: '#fff', fontFamily: 'Space Mono', lineHeight: 1 }}>SCAM</div>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginTop: 4 }}>
+          <span style={{ fontSize: 12, color: '#aaa', fontFamily: 'Space Mono' }}>$0.000001</span>
+          <span style={{ fontSize: 11, color: '#f54242', fontFamily: 'Space Mono', fontWeight: 700 }}>▼ 91.2%</span>
+        </div>
+      </div>
+    </div>
+    <div className="countdown" style={{ background: '#2a2a2a' }}>
+      <div className="countdown-fill" style={{ background: '#f54242', width: '30%' }} />
+    </div>
+  </div>
+);
+
+// V5: Pill — super minimal, single line
+const PopupV5 = () => (
+  <div className="wf wf-border wf-shadow fill-dark" style={{ width: 220, position: 'relative', overflow: 'hidden' }}>
+    <div className="accent-stripe" style={{ background: '#f5c842' }} />
+    <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px 8px 14px' }}>
+      <div style={{ background: '#f5c842', padding: '3px 8px', border: '1.5px solid #333', boxShadow: '2px 2px 0 #333' }}>
+        <span style={{ fontSize: 14, fontWeight: 700, fontFamily: 'Space Mono', color: '#111' }}>63</span>
+      </div>
+      <span style={{ fontSize: 16, fontWeight: 700, color: '#fff', fontFamily: 'Space Mono', flex: 1 }}>BONK</span>
+      <span style={{ fontSize: 12, color: '#f5c842', fontFamily: 'Space Mono', fontWeight: 700 }}>▲12.3%</span>
+      <span style={{ fontSize: 12, color: '#555' }}>✕</span>
+    </div>
+    <div className="countdown" style={{ background: '#2a2a2a' }}>
+      <div className="countdown-fill" style={{ background: '#f5c842', width: '70%' }} />
+    </div>
+  </div>
+);
+
+/* ── SETTINGS PANEL VARIANTS ── */
+
+const SLabel = ({ children, light }) => (
+  <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', color: light ? '#888' : '#666', textTransform: 'uppercase', fontFamily: 'Space Mono', marginBottom: 5 }}>{children}</div>
+);
+const SRow = ({ label, value, light }) => (
+  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '4px 0', borderBottom: `1px solid ${light ? '#2a2a2a' : '#e0e0e0'}` }}>
+    <span style={{ fontSize: 10, fontFamily: 'Space Mono', color: light ? '#666' : '#999', letterSpacing: '0.04em' }}>{label}</span>
+    <span style={{ fontFamily: 'Space Mono', fontSize: 11, fontWeight: 700, color: light ? '#fff' : '#111' }}>{value}</span>
+  </div>
+);
+
+// Shared Skills tab content
+const SkillsTab = ({ light }) => (
+  <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
+    {[
+      { name: 'Jupiter Swap', tag: 'DEX', active: true },
+      { name: 'Drift Protocol', tag: 'PERPS', active: false },
+      { name: 'MarginFi Lend', tag: 'LENDING', active: false },
+      { name: 'Kamino Earn', tag: 'YIELD', active: false },
+    ].map(s => (
+      <div key={s.name} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '7px 0', borderBottom: `1px solid ${light ? '#2e2e2e' : '#e8e4dc'}` }}>
+        <div>
+          <span style={{ fontSize: 12, fontWeight: 700, color: light ? '#fff' : '#111', fontFamily: 'Space Mono' }}>{s.name}</span>
+          <span style={{ fontSize: 9, color: light ? '#f5e642' : '#555', fontFamily: 'Space Mono', fontWeight: 700, marginLeft: 6, background: light ? '#222' : '#e0e0d0', padding: '1px 4px', border: `1px solid ${light ? '#444' : '#aaa'}` }}>{s.tag}</span>
+        </div>
+        <div style={{ width: 28, height: 14, background: s.active ? '#8bf542' : (light ? '#333' : '#ccc'), border: `1.5px solid ${light ? '#555' : '#aaa'}`, position: 'relative', cursor: 'pointer', flexShrink: 0 }}>
+          <div style={{ position: 'absolute', top: 1, left: s.active ? 13 : 1, width: 9, height: 9, background: s.active ? '#111' : (light ? '#666' : '#888') }} />
+        </div>
+      </div>
+    ))}
+    <button style={{ width: '100%', padding: '6px', marginTop: 8, fontSize: 10, fontWeight: 700, fontFamily: 'Space Mono', background: 'none', border: `1.5px dashed ${light ? '#444' : '#bbb'}`, color: light ? '#555' : '#999', cursor: 'pointer', letterSpacing: '0.04em' }}>+ Browse plugins</button>
+  </div>
+);
+
+// Shared State tab content
+const StateTab = ({ light, paused, walletConnected }) => (
+  <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        <div style={{ width: 8, height: 8, borderRadius: '50%', background: paused ? '#555' : '#8bf542', border: `1px solid ${light ? '#555' : '#444'}` }} />
+        <span style={{ fontSize: 13, fontWeight: 700, color: paused ? (light ? '#666' : '#666') : (light ? '#fff' : '#111'), fontFamily: 'Space Mono' }}>{paused ? 'PAUSED' : 'ACTIVE'}</span>
+      </div>
+      <button className={paused ? 'act-btn fill-lime' : 'act-btn'} style={{ fontSize: 11, padding: '3px 10px', fontFamily: 'Space Mono', background: paused ? '#8bf542' : (light ? '#222' : '#e0dbd0'), color: paused ? '#111' : (light ? '#888' : '#555'), borderColor: paused ? '#333' : (light ? '#444' : '#aaa') }}>{paused ? 'Resume' : 'Pause'}</button>
+    </div>
+    <div className="sep" style={{ borderColor: light ? '#2e2e2e' : '#ddd' }} />
+    <div>
+      <SLabel light={light}>STATS</SLabel>
+      <SRow label="Last seen" value="BONK" light={light} />
+      <SRow label="Session" value="2h 14m" light={light} />
+    </div>
+    <div>
+      <SLabel light={light}>AI MODE</SLabel>
+      <div className="toggle-group">
+        {['Auto','Cloud','Local'].map((m, i) => (
+          <div key={m} className={i === 0 ? 'toggle-btn active' : 'toggle-btn inactive'} style={{ fontFamily: 'Space Mono', fontSize: 10, borderColor: i === 0 ? '#333' : (light ? '#444' : '#bbb'), background: i === 0 ? '#f5e642' : (light ? '#282828' : '#e0dbd0'), color: i === 0 ? '#111' : (light ? '#666' : '#777') }}>{m}</div>
+        ))}
+      </div>
+    </div>
+    <div>
+      <SLabel light={light}>LOGIN</SLabel>
+      {walletConnected ? (
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '5px 8px', border: `1.5px solid ${light ? '#444' : '#bbb'}`, background: light ? '#1a1a1a' : '#e8e4d8' }}>
+          <span style={{ fontSize: 10, color: light ? '#aaa' : '#555', fontFamily: 'Space Mono' }}>AbcDef…1234</span>
+          <button style={{ fontSize: 10, color: '#f54242', background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'Space Mono', fontWeight: 700 }}>Disconnect</button>
+        </div>
+      ) : (
+        <button className="act-btn fill-yellow" style={{ width: '100%', textAlign: 'center', padding: '7px', fontSize: 11, fontFamily: 'Space Mono', borderColor: '#333' }}>Connect Wallet</button>
+      )}
+    </div>
+  </div>
+);
+
+// Tabbed settings shell
+const SettingsShell = ({ light, paused = false, walletConnected = false, defaultTab = 'state', headerOverride }) => {
+  const [tab, setTab] = React.useState(defaultTab);
+  const bg = light ? '#ffffff' : '#181818';
+  const headerBg = headerOverride || (light ? '#f5e642' : '#111');
+  const headerText = headerOverride ? '#111' : (light ? '#111' : '#f5e642');
+  const tabActive = { background: light ? '#fff' : '#2a2a2a', color: light ? '#111' : '#fff', borderBottom: `2px solid ${light ? '#111' : '#f5e642'}` };
+  const tabInactive = { background: light ? '#f0f0f0' : 'none', color: light ? '#888' : '#555', borderBottom: '2px solid transparent' };
+  return (
+    <div className="wf wf-border wf-shadow" style={{ width: 260, background: bg, position: 'relative' }}>
+      {/* Header */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '9px 12px', borderBottom: `2px solid #111`, background: headerBg }}>
+        <span style={{ fontSize: 12, fontWeight: 700, color: headerText, letterSpacing: '0.08em', fontFamily: 'Space Mono' }}>QUICKDRAW</span>
+        <span style={{ fontSize: 13, color: light ? '#333' : '#555', cursor: 'pointer' }}>✕</span>
+      </div>
+      {/* Tabs */}
+      <div style={{ display: 'flex', borderBottom: `1px solid ${light ? '#ddd' : '#2e2e2e'}` }}>
+        {['state','skills'].map(t => (
+          <button key={t} onClick={() => setTab(t)} style={{ flex: 1, padding: '7px 0', fontSize: 10, fontWeight: 700, fontFamily: 'Space Mono', letterSpacing: '0.06em', textTransform: 'uppercase', cursor: 'pointer', border: 'none', ...(tab === t ? tabActive : tabInactive) }}>
+            {t === 'state' ? 'State' : 'Skills'}
+          </button>
+        ))}
+      </div>
+      {/* Tab content */}
+      <div style={{ padding: '12px 12px' }}>
+        {tab === 'state'
+          ? <StateTab light={!light} paused={paused} walletConnected={walletConnected} />
+          : <SkillsTab light={!light} />}
+      </div>
+      <div className="sep" style={{ borderColor: light ? '#ddd' : '#2e2e2e' }} />
+      <div style={{ padding: '6px 12px' }}>
+        <span style={{ fontSize: 10, color: light ? '#bbb' : '#333', fontFamily: 'Space Mono' }}>v0.1.0</span>
+      </div>
+    </div>
+  );
+};
+
+// V1: Dark — active state
+const SettingsV1 = () => <SettingsShell light={false} paused={false} walletConnected={false} defaultTab="state" />;
+
+// V2: Light — yellow header
+const SettingsV2 = () => <SettingsShell light={true} paused={false} walletConnected={false} defaultTab="state" />;
+
+// V3: Dark — paused + wallet connected
+const SettingsV3 = () => <SettingsShell light={false} paused={true} walletConnected={true} defaultTab="state" />;
+
+/* ── SWAP PANEL ── */
+const SwapPanel = ({ state = 'idle', amount = '', compact = false }) => {
+  const bg = '#0d0d0d';
+  const border = '2px solid #111';
+  const hasAmount = amount && parseFloat(amount) > 0;
+
+  const btnStates = {
+    'no-wallet':  { label: 'CONNECT WALLET', bg: '#1a1a1a', color: '#555', border: '2px solid #333' },
+    'idle':       { label: 'ENTER AMOUNT',   bg: '#1a1a1a', color: '#555', border: '2px solid #333' },
+    'fetching':   { label: 'FETCHING…',      bg: '#1a1a1a', color: '#555', border: '2px solid #333' },
+    'ready':      { label: 'SWAP NOW',       bg: '#f5e642', color: '#111', border: '2px solid #111' },
+    'confirming': { label: 'CONFIRMING…',   bg: '#1a1a1a', color: '#555', border: '2px solid #333' },
+    'success':    { label: '✓ SWAPPED',      bg: '#8bf542', color: '#111', border: '2px solid #111' },
+    'error':      { label: 'RETRY',          bg: '#f54242', color: '#fff', border: '2px solid #111' },
+  };
+  const btn = btnStates[state] || btnStates['idle'];
+  const showQuote = state === 'ready' || state === 'confirming' || state === 'success' || state === 'error';
+  const inputDisabled = state === 'no-wallet' || state === 'confirming' || state === 'success';
+
+  return (
+    <div style={{ width: 260, background: bg, border, boxShadow: '3px 3px 0 #000', fontFamily: 'Space Mono, monospace' }}>
+      {/* Header */}
+      <div style={{ padding: compact ? '6px 12px' : '8px 12px', borderBottom: '1px solid #1e1e1e', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <span style={{ fontSize: 10, fontWeight: 700, color: '#f5e642', letterSpacing: '0.08em' }}>BUY BONK</span>
+        {state === 'no-wallet' && <span style={{ fontSize: 9, color: '#444' }}>wallet req'd</span>}
+      </div>
+
+      <div style={{ padding: compact ? '8px 12px' : '10px 12px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {/* Input row */}
+        <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+          <div style={{
+            flex: 1, height: 32, background: inputDisabled ? '#181818' : '#1e1e1e',
+            border: `1.5px solid ${state === 'ready' ? '#f5e642' : '#555'}`,
+            display: 'flex', alignItems: 'center', padding: '0 10px',
+          }}>
+            <span style={{ fontSize: 13, color: amount ? '#fff' : '#666', fontWeight: 700 }}>
+              {amount || (inputDisabled ? '—' : '0.0')}
+            </span>
+            <span style={{ fontSize: 10, color: '#bbb', marginLeft: 6 }}>SOL</span>
+          </div>
+          <div style={{ height: 32, padding: '0 10px', border: '1.5px solid #555', display: 'flex', alignItems: 'center', background: '#1a1a1a', cursor: 'pointer' }}>
+            <span style={{ fontSize: 10, fontWeight: 700, color: '#fff' }}>MAX</span>
+          </div>
+        </div>
+
+        {/* Arrow */}
+        <div style={{ textAlign: 'center', fontSize: 12, color: '#bbb' }}>↓</div>
+
+        {/* Quote display */}
+        {showQuote ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+            <div style={{ fontSize: 12, color: '#fff', fontWeight: 700 }}>
+              ~12,345 BONK <span style={{ color: '#888', fontWeight: 400 }}>($6.17)</span>
+            </div>
+            <div style={{ fontSize: 9, color: '#ccc', display: 'flex', gap: 8 }}>
+              <span>1 SOL = 24,690 BONK</span>
+              <span style={{ color: state === 'error' ? '#f54242' : '#ccc' }}>• Impact: 0.2%</span>
+            </div>
+          </div>
+        ) : (
+          <div style={{ height: 28, background: '#111', border: '1px dashed #666', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <span style={{ fontSize: 9, color: '#aaa' }}>quote appears here</span>
+          </div>
+        )}
+
+        {/* Action button */}
+        <button style={{
+          width: '100%', height: 36,
+          background: btn.bg, color: btn.color, border: btn.border,
+          fontSize: 11, fontWeight: 700, fontFamily: 'Space Mono, monospace',
+          letterSpacing: '0.06em', cursor: state === 'ready' || state === 'error' ? 'pointer' : 'default',
+          boxShadow: (state === 'ready' || state === 'success') ? '3px 3px 0 #111' : 'none',
+          marginTop: 2,
+        }}>{btn.label}</button>
+
+        {/* Status text */}
+        {state === 'error' && (
+          <div style={{ fontSize: 9, color: '#f54242', textAlign: 'center' }}>No route found (low liquidity)</div>
+        )}
+        {state === 'success' && (
+          <div style={{ fontSize: 9, color: '#8bf542', textAlign: 'center' }}>Tx: abc…xyz ↗ (Solscan)</div>
+        )}
+        {state === 'fetching' && (
+          <div style={{ fontSize: 9, color: '#ccc', textAlign: 'center' }}>Fetching Jupiter quote…</div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+/* ── TWEAKS DEFAULTS (defined before App) ── */
+const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
+  "uiScale": 1,
+  "annotColor": "#cc2200",
+  "variantLabelSize": 15,
+  "canvasBg": "#ffffff",
+  "showAnnotations": true,
+  "accentYellow": "#f5e642",
+  "accentLime": "#8bf542",
+  "accentCyan": "#42e8f5",
+  "accentRed": "#f54242"
+}/*EDITMODE-END*/;
+
+/* ── MAIN APP ── */
+function App({ tweaks = TWEAK_DEFAULTS, setTweaks, tweaksVisible, setTweaksVisible }) {
+  return (
+    <>
+      <DesignCanvas title="Quickdraw — Wireframes">
+      {/* ── ROW 1: V3 POPUP — ALL STATES ── */}
+      <DCSection id="s1" title="Token Popup V3 — States">
+
+        <DCArtboard id="st-load" label="Loading" width={320} height={220}>
+          <div style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <div className="variant-label">Appears instantly on copy</div>
+            <PopupV3 state="loading" />
+            <Annot>Dark header, score = ?, ticker greyed. Countdown starts immediately.</Annot>
+          </div>
+        </DCArtboard>
+
+        <DCArtboard id="st-safe" label="SAFE (82)" width={320} height={220}>
+          <div style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <div className="variant-label">Score loaded — lime header</div>
+            <PopupV3 state="safe" score={82} ticker="BONK" price="$0.000021" change="▲ 12.3%" showBuyToggle={true} />
+            <Annot>Lime header snaps in. Ticker + price visible immediately.</Annot>
+          </div>
+        </DCArtboard>
+
+        <DCArtboard id="st-caution" label="CAUTION (63)" width={320} height={220}>
+          <div style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <div className="variant-label">Amber header — proceed with care</div>
+            <PopupV3 state="caution" score={63} ticker="PEPE2" price="$0.000004" change="▲ 2.1%" showBuyToggle={true} />
+            <Annot>Amber fills header. Same layout, color signals caution.</Annot>
+          </div>
+        </DCArtboard>
+
+        <DCArtboard id="st-danger" label="HIGH RISK (21)" width={320} height={220}>
+          <div style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <div className="variant-label">Red header — rug/scam signal</div>
+            <PopupV3 state="danger" score={21} ticker="PEPE2" price="$0.000001" change="▼ 91.2%" showBuyToggle={true} />
+            <Annot>Red header, white text. Urgency is unmistakable.</Annot>
+          </div>
+        </DCArtboard>
+
+        <DCArtboard id="st-dismiss" label="Countdown warning" width={320} height={220}>
+          <div style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <div className="variant-label">Bar nearly empty</div>
+            <div style={{ position: 'relative' }}>
+              <PopupV3 state="safe" score={82} ticker="BONK" price="$0.000021" change="▲ 12.3%" showBuyToggle={true} />
+              <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: 3, background: '#2a2a2a' }}>
+                <div style={{ height: '100%', width: '7%', background: '#8bf542' }} />
+              </div>
+            </div>
+            <Annot>Bar at ~7%. Subtle fade-out begins at 15%.</Annot>
+          </div>
+        </DCArtboard>
+
+      </DCSection>
+
+      {/* ── ROW 2: SWAP UI ── */}
+      <DCSection id="s-swap" title="Swap UI — States">
+
+        <DCArtboard id="sw1" label="No wallet connected" width={320} height={380}>
+          <div style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <div className="variant-label">Swap section · no wallet</div>
+            <SwapPanel state="no-wallet" />
+            <Annot>Swap section below token popup. Input + button disabled.</Annot>
+          </div>
+        </DCArtboard>
+
+        <DCArtboard id="sw2" label="Wallet connected · no amount" width={320} height={380}>
+          <div style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <div className="variant-label">Input enabled · awaiting amount</div>
+            <SwapPanel state="idle" />
+            <Annot>Wallet connected. Input active. Button: ENTER AMOUNT (grey).</Annot>
+          </div>
+        </DCArtboard>
+
+        <DCArtboard id="sw3" label="Fetching quote" width={320} height={380}>
+          <div style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <div className="variant-label">500ms debounce · fetching Jupiter quote</div>
+            <SwapPanel state="fetching" amount="0.5" />
+            <Annot>Quote fetch in progress. Button: FETCHING… (grey).</Annot>
+          </div>
+        </DCArtboard>
+
+        <DCArtboard id="sw4" label="Quote ready" width={320} height={380}>
+          <div style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <div className="variant-label">Quote loaded · SWAP NOW active</div>
+            <SwapPanel state="ready" amount="0.5" />
+            <Annot>Output amount + rate + impact shown. Yellow SWAP NOW button.</Annot>
+          </div>
+        </DCArtboard>
+
+        <DCArtboard id="sw5" label="Confirming" width={320} height={380}>
+          <div style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <div className="variant-label">Tx submitted · wallet signing</div>
+            <SwapPanel state="confirming" amount="0.5" />
+            <Annot>Reown wallet sign request sent. Button: CONFIRMING…</Annot>
+          </div>
+        </DCArtboard>
+
+        <DCArtboard id="sw6" label="Success" width={320} height={380}>
+          <div style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <div className="variant-label">Tx confirmed · success state</div>
+            <SwapPanel state="success" amount="0.5" />
+            <Annot>Green ✓ SWAPPED. Tx link → Solscan. Resets after 3s.</Annot>
+          </div>
+        </DCArtboard>
+
+        <DCArtboard id="sw7" label="Error state" width={320} height={380}>
+          <div style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <div className="variant-label">Tx failed · retry</div>
+            <SwapPanel state="error" amount="0.5" />
+            <Annot>Red error msg. Button: RETRY. Error: "No route found".</Annot>
+          </div>
+        </DCArtboard>
+
+        <DCArtboard id="sw8" label="Full popup + swap" width={320} height={560}>
+          <div style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <div className="variant-label">BUY button · swap panel open</div>
+            <PopupV3 state="safe" score={82} ticker="BONK" price="$0.000021" change="▲ 12.3%" showBuyToggle={true} />
+            <Annot>BUY button in price row. Click to expand/collapse swap panel.</Annot>
+          </div>
+        </DCArtboard>
+
+      </DCSection>
+
+      {/* ── ROW 3: SETTINGS ── */}
+      <DCSection id="s2" title="Settings Panel">
+
+        <DCArtboard id="sp1" label="V1 — Dark · active" width={340} height={500}>
+          <div style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <div className="variant-label">Dark bg · lime status · cyan CTA</div>
+            <SettingsV1 />
+            <Annot>Matches popup. Yellow brand header, lime active dot.</Annot>
+          </div>
+        </DCArtboard>
+
+        <DCArtboard id="sp2" label="V2 — Light · yellow header" width={340} height={500}>
+          <div style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <div className="variant-label">White bg · yellow header</div>
+            <SettingsV2 />
+            <Annot>High contrast daylight variant. Dark header anchors brand.</Annot>
+          </div>
+        </DCArtboard>
+
+        <DCArtboard id="sp3" label="V3 — Dark · paused · connected" width={340} height={500}>
+          <div style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <div className="variant-label">Yellow header · paused · connected</div>
+            <SettingsV3 />
+            <Annot>Yellow header = brand anchor. Grey dot = paused. Wallet row shows address.</Annot>
+          </div>
+        </DCArtboard>
+
+        <DCArtboard id="sp4" label="Skills tab — open" width={340} height={500}>
+          <div style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <div className="variant-label">Skills tab active · plugin toggles</div>
+            <SettingsShell light={false} defaultTab="skills" />
+            <Annot>Skills tab: DeFi plugin toggles. Browse plugins CTA at bottom.</Annot>
+          </div>
+        </DCArtboard>
+
+      </DCSection>
+
+      {/* ── ROW 4: IN CONTEXT ── */}
+      <DCSection id="s3" title="In-Context Placement">
+
+        <DCArtboard id="ctx1" label="Desktop — popup near cursor" width={700} height={420}>
+          <div style={{ padding: 20 }}>
+            <div className="variant-label" style={{ marginBottom: 12 }}>20px right / 10px below cursor · settings top-right</div>
+            <div style={{ position: 'relative', width: '100%', height: 340, background: '#1c1c2e', border: '2px solid #333', overflow: 'hidden' }}>
+              <div style={{ position: 'absolute', top: 20, left: 20, width: 210, height: 110, background: '#1a1a2e', border: '1px solid #333', padding: 10 }}>
+                <div style={{ fontSize: 10, color: '#555', fontFamily: 'Space Mono', marginBottom: 6 }}>Discord — #degen-calls</div>
+                <div style={{ fontSize: 10, color: '#777', lineHeight: 1.6 }}>
+                  Check this token:<br/>
+                  <span style={{ color: '#42e8f5', background: '#002', fontSize: 9, fontFamily: 'Space Mono' }}>DezXAZ8NC2EEqmHfTEB9rEE53k52LNmMme7xtB263</span>
+                </div>
+              </div>
+              <div style={{ position: 'absolute', top: 20, left: 250, width: 150, height: 70, background: '#111', border: '1px solid #333', padding: 8 }}>
+                <div style={{ fontSize: 9, color: '#555', fontFamily: 'Space Mono', marginBottom: 4 }}>Terminal</div>
+                <div style={{ fontSize: 9, color: '#8bf542', fontFamily: 'Space Mono' }}>$ spl-token address<br/>DezXAZ…B263</div>
+              </div>
+              <div style={{ position: 'absolute', top: 78, left: 126, fontSize: 14, color: '#fff' }}>▸</div>
+              <div style={{ position: 'absolute', top: 92, left: 146, transform: 'scale(0.82)', transformOrigin: 'top left' }}>
+                <PopupV3 state="safe" score={82} ticker="BONK" price="$0.000021" change="▲ 12.3%" showBuyToggle={true} />
+              </div>
+              <div style={{ position: 'absolute', top: 8, right: 8, transform: 'scale(0.65)', transformOrigin: 'top right' }}>
+                <SettingsV1 />
+              </div>
+              <div style={{ position: 'absolute', bottom: 8, left: 8, fontSize: 10, color: '#444', fontFamily: 'Space Mono' }}>
+                Popup: 20px right + 10px below cursor · Settings: 32px top, 8px right
+              </div>
+            </div>
+          </div>
+        </DCArtboard>
+
+        <DCArtboard id="ctx2" label="Anatomy callouts" width={480} height={380}>
+          <div style={{ padding: 30 }}>
+            <div className="variant-label" style={{ marginBottom: 16 }}>V3 structure annotated</div>
+            <div style={{ position: 'relative', display: 'inline-block' }}>
+              <PopupV3 state="safe" score={82} ticker="BONK" price="$0.000021" change="▲ 12.3%" />
+              <div style={{ position: 'absolute', top: 4, right: -145, fontSize: 13, color: '#c44', fontFamily: 'Caveat', width: 135, lineHeight: 1.4 }}>← 2px border<br/>3px hard shadow</div>
+              <div style={{ position: 'absolute', top: 20, left: -130, fontSize: 13, color: '#c44', fontFamily: 'Caveat', width: 120, textAlign: 'right', lineHeight: 1.4 }}>score banner →<br/>= safety color</div>
+              <div style={{ position: 'absolute', top: 50, right: -145, fontSize: 13, color: '#c44', fontFamily: 'Caveat', width: 135, lineHeight: 1.4 }}>← ticker bold<br/>+ score large</div>
+              <div style={{ position: 'absolute', bottom: 18, left: -130, fontSize: 13, color: '#c44', fontFamily: 'Caveat', width: 120, textAlign: 'right', lineHeight: 1.4 }}>countdown →<br/>bar 3px, 5s drain</div>
+              <div style={{ position: 'absolute', bottom: 40, right: -130, fontSize: 13, color: '#c44', fontFamily: 'Caveat', width: 120, lineHeight: 1.4 }}>← price + %<br/>change below</div>
+            </div>
+          </div>
+        </DCArtboard>
+
+      </DCSection>
+            </DesignCanvas>
+      {tweaksVisible && <TweaksPanel tweaks={tweaks} setTweaks={setTweaks} onClose={() => setTweaksVisible(false)} />}
+    </>
+  );
+}
+
+/* ── TWEAKS PANEL ── */
+
+function TweaksPanel({ tweaks, setTweaks, onClose }) {
+  const set = (k, v) => {
+    const next = { ...tweaks, [k]: v };
+    setTweaks(next);
+    window.parent.postMessage({ type: '__edit_mode_set_keys', edits: next }, '*');
+    applyTweaks(next);
+  };
+  const panelStyle = {
+    position: 'fixed', bottom: 20, right: 20, zIndex: 9999,
+    background: '#f5f0e8', border: '2px solid #111', boxShadow: '4px 4px 0 #111',
+    padding: '12px 14px', width: 240, fontFamily: 'Caveat, cursive',
+  };
+  const rowStyle = { display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 };
+  const labelStyle = { fontSize: 13, fontWeight: 700, color: '#111' };
+  const inputStyle = { border: '1.5px solid #333', padding: '2px 6px', fontFamily: 'Caveat, cursive', fontSize: 12, background: '#fff' };
+  return (
+    <div style={panelStyle}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, borderBottom: '1.5px solid #ccc', paddingBottom: 8 }}>
+        <span style={{ fontSize: 15, fontWeight: 700, color: '#111', letterSpacing: '0.04em' }}>Tweaks</span>
+        <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: 16, cursor: 'pointer', color: '#555' }}>✕</button>
+      </div>
+
+      <div style={{ fontSize: 10, fontWeight: 700, color: '#888', letterSpacing: '0.08em', fontFamily: 'Space Mono', marginBottom: 6 }}>SCALE</div>
+      <div style={rowStyle}>
+        <span style={labelStyle}>UI Scale</span>
+        <div style={{ display: 'flex', gap: 4 }}>
+          {[0.75, 1, 1.25, 1.5].map(s => (
+            <button key={s} onClick={() => set('uiScale', s)} style={{ ...inputStyle, background: tweaks.uiScale === s ? '#f5e642' : '#fff', fontWeight: 700, cursor: 'pointer', minWidth: 32, textAlign: 'center' }}>{s}×</button>
+          ))}
+        </div>
+      </div>
+
+      <div style={{ fontSize: 10, fontWeight: 700, color: '#888', letterSpacing: '0.08em', fontFamily: 'Space Mono', marginBottom: 6 }}>CANVAS</div>
+      <div style={rowStyle}>
+        <span style={labelStyle}>Background</span>
+        <div style={{ display: 'flex', gap: 4 }}>
+          {['#1a1a1a','#f5f0e8','#ffffff'].map(bg => (
+            <button key={bg} onClick={() => set('canvasBg', bg)} title={bg} style={{ width: 22, height: 22, background: bg, border: tweaks.canvasBg === bg ? '2px solid #f5e642' : '1.5px solid #666', cursor: 'pointer', boxShadow: tweaks.canvasBg === bg ? '2px 2px 0 #333' : 'none' }} />
+          ))}
+        </div>
+      </div>
+      <div style={rowStyle}>
+        <span style={labelStyle}>Annotations</span>
+        <button onClick={() => set('showAnnotations', !tweaks.showAnnotations)} style={{ ...inputStyle, background: tweaks.showAnnotations ? '#8bf542' : '#ddd', cursor: 'pointer', fontWeight: 700, padding: '2px 10px' }}>
+          {tweaks.showAnnotations ? 'ON' : 'OFF'}
+        </button>
+      </div>
+
+      <div style={{ fontSize: 10, fontWeight: 700, color: '#888', letterSpacing: '0.08em', fontFamily: 'Space Mono', marginBottom: 6 }}>PALETTE</div>
+      {[['accentYellow','Yellow'],['accentLime','Lime'],['accentCyan','Cyan'],['accentRed','Red']].map(([key, lbl]) => (
+        <div key={key} style={{ ...rowStyle, marginBottom: 7 }}>
+          <span style={labelStyle}>{lbl}</span>
+          <input type="color" value={tweaks[key]} onChange={e => set(key, e.target.value)}
+            style={{ width: 36, height: 24, border: '1.5px solid #333', cursor: 'pointer', padding: 1 }} />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function applyTweaks(t) {
+  document.body.style.background = t.canvasBg;
+  const root = document.documentElement;
+  root.style.setProperty('--accent-yellow', t.accentYellow);
+  root.style.setProperty('--accent-lime', t.accentLime);
+  root.style.setProperty('--accent-cyan', t.accentCyan);
+  root.style.setProperty('--accent-red', t.accentRed);
+  root.style.setProperty('--ui-scale', t.uiScale);
+  root.style.setProperty('--annot-color', t.annotColor);
+  // annotations visibility
+  const style = document.getElementById('tweak-annot-style') || Object.assign(document.createElement('style'), { id: 'tweak-annot-style' });
+  if (!style.parentNode) document.head.appendChild(style);
+  style.textContent = t.showAnnotations ? '' : '.annot, [data-annot] { opacity: 0 !important; }';
+}
+
+function AppWithTweaks() {
+  const saved = (() => { try { return JSON.parse(localStorage.getItem('qd-tweaks') || '{}'); } catch(e) { return {}; } })();
+  const [tweaks, setTweaksRaw] = useState({ ...TWEAK_DEFAULTS, ...saved });
+  const [tweaksVisible, setTweaksVisible] = useState(false);
+
+  const setTweaks = (t) => {
+    setTweaksRaw(t);
+    localStorage.setItem('qd-tweaks', JSON.stringify(t));
+  };
+
+  useEffect(() => {
+    applyTweaks(tweaks);
+    const handler = (e) => {
+      if (e.data?.type === '__activate_edit_mode') setTweaksVisible(true);
+      if (e.data?.type === '__deactivate_edit_mode') setTweaksVisible(false);
+    };
+    window.addEventListener('message', handler);
+    window.parent.postMessage({ type: '__edit_mode_available' }, '*');
+    return () => window.removeEventListener('message', handler);
+  }, []);
+
+  useEffect(() => { applyTweaks(tweaks); }, [tweaks]);
+
+  return <App tweaks={tweaks} setTweaks={setTweaks} tweaksVisible={tweaksVisible} setTweaksVisible={setTweaksVisible} />;
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<AppWithTweaks />);
+
+</script>
+</body>
+</html>
