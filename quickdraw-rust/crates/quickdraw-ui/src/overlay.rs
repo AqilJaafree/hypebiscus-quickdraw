@@ -28,7 +28,7 @@ pub fn show_overlay(ui: &mut Ui, snap: &AppSnapshot, cmd_tx: &mpsc::Sender<Comma
                         .color(Colors::ACCENT_YELLOW),
                 );
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ghost_button(ui, "✕").clicked() {
+                    if ghost_button(ui, "X").clicked() {
                         let _ = cmd_tx.try_send(Command::DismissOverlay);
                     }
                 });

@@ -1,10 +1,18 @@
 /// Header rendering module — extracted from app.rs for clarity.
 /// Handles the score-first colored header with buttons.
 
+use std::sync::Arc;
 use egui::{Color32, FontId, FontFamily, Painter, Rect, Vec2};
 use tokio::sync::mpsc;
 use quickdraw_core::commands::Command;
 use crate::design::Colors;
+
+#[derive(Clone)]
+struct HeaderGalleys {
+    score: Arc<egui::Galley>,
+    label: Arc<egui::Galley>,
+    ticker: Arc<egui::Galley>,
+}
 
 // Layout constants
 const HEADER_HEIGHT: f32 = 54.0;
@@ -15,12 +23,9 @@ const TICKER_SIZE: f32 = 17.0;
 const BUTTON_SIZE: f32 = 22.0;
 const BUTTON_FONT_SIZE: f32 = 12.0;
 const LABEL_TICKER_GAP: f32 = 2.0;
-const SCORE_TEXT_GAP: f32 = 10.0;
 const BUTTON_SPACING: f32 = 2.0;
 
-/// Colors for different states
 struct HeaderColors {
-    bg: Color32,
     text: Color32,
     muted: Color32,
     btn: Color32,
@@ -30,7 +35,6 @@ impl HeaderColors {
     fn new(loading: bool, score: u8) -> Self {
         if loading {
             Self {
-                bg: Color32::from_rgb(0x1E, 0x1E, 0x1E),
                 text: Color32::from_rgb(0x33, 0x33, 0x33),
                 muted: Color32::from_rgb(0x33, 0x33, 0x33),
                 btn: Color32::from_rgba_premultiplied(0, 0, 0, 110),
@@ -38,7 +42,6 @@ impl HeaderColors {
         } else {
             let danger = score < 50;
             Self {
-                bg: Colors::safety_color(score),
                 text: if danger { Color32::WHITE } else { Color32::BLACK },
                 muted: if danger {
                     Color32::from_rgba_premultiplied(255, 255, 255, 100)
@@ -67,43 +70,52 @@ fn render_text(
 ) {
     let mid = row.min.y + HEADER_HEIGHT / 2.0;
 
-    // Measure all text
-    let g_score = ui.fonts(|f| {
-        f.layout_no_wrap(
-            score_str.into(),
-            FontId::new(SCORE_SIZE, FontFamily::Monospace),
-            colors.text,
-        )
-    });
-    let g_label = ui.fonts(|f| {
-        f.layout_no_wrap(
-            label_str.into(),
-            FontId::new(LABEL_SIZE, FontFamily::Monospace),
-            colors.muted,
-        )
-    });
-    let g_ticker = ui.fonts(|f| {
-        f.layout_no_wrap(
-            ticker.into(),
-            FontId::new(TICKER_SIZE, FontFamily::Monospace),
-            colors.text,
-        )
-    });
+    // Cache key encodes content + the score byte (which drives colour changes)
+    let cache_id = egui::Id::new(("hdr", score_str, label_str, ticker));
+    let cached: Option<HeaderGalleys> = ui.ctx().data(|d| d.get_temp(cache_id));
+    let galleys = if let Some(g) = cached {
+        g
+    } else {
+        let g_score = ui.fonts(|f| {
+            f.layout_no_wrap(
+                score_str.into(),
+                FontId::new(SCORE_SIZE, FontFamily::Monospace),
+                colors.text,
+            )
+        });
+        let g_label = ui.fonts(|f| {
+            f.layout_no_wrap(
+                label_str.into(),
+                FontId::new(LABEL_SIZE, FontFamily::Monospace),
+                colors.muted,
+            )
+        });
+        let g_ticker = ui.fonts(|f| {
+            f.layout_no_wrap(
+                ticker.into(),
+                FontId::new(TICKER_SIZE, FontFamily::Monospace),
+                colors.text,
+            )
+        });
+        let g = HeaderGalleys { score: g_score, label: g_label, ticker: g_ticker };
+        ui.ctx().data_mut(|d| d.insert_temp(cache_id, g.clone()));
+        g
+    };
 
     // Position score — capture size before galley is moved into painter
     let x_score  = row.min.x + PADDING + 2.0;
-    let y_score  = mid - g_score.size().y / 2.0;
-    let score_w  = g_score.size().x;
-    p.galley(egui::pos2(x_score, y_score), g_score, colors.text);
+    let y_score  = mid - galleys.score.size().y / 2.0;
+    let score_w  = galleys.score.size().x;
+    p.galley(egui::pos2(x_score, y_score), galleys.score, colors.text);
 
     // Position label+ticker block (centered as unit)
-    let block_h = g_label.size().y + LABEL_TICKER_GAP + g_ticker.size().y;
-    let x_text  = x_score + score_w + 10.0;
-    let y_label = mid - block_h / 2.0;
-    let y_ticker = y_label + g_label.size().y + LABEL_TICKER_GAP;
+    let block_h = galleys.label.size().y + LABEL_TICKER_GAP + galleys.ticker.size().y;
+    let x_text   = x_score + score_w + 10.0;
+    let y_label  = mid - block_h / 2.0;
+    let y_ticker = y_label + galleys.label.size().y + LABEL_TICKER_GAP;
 
-    p.galley(egui::pos2(x_text, y_label), g_label, colors.muted);
-    p.galley(egui::pos2(x_text, y_ticker), g_ticker, colors.text);
+    p.galley(egui::pos2(x_text, y_label),  galleys.label,  colors.muted);
+    p.galley(egui::pos2(x_text, y_ticker), galleys.ticker, colors.text);
 }
 
 /// Render and handle interactive buttons (gear, X)
@@ -132,8 +144,8 @@ fn render_buttons(
     let x_resp = ui.interact(x_rect, egui::Id::new("hdr_x"), egui::Sense::click());
     let gear_resp = ui.interact(gear_rect, egui::Id::new("hdr_gear"), egui::Sense::click());
 
-    let f_btn = FontId::new(BUTTON_FONT_SIZE, FontFamily::Monospace);
-    for (r, lbl) in [(&x_resp, "X"), (&gear_resp, "~")] {
+    let f_btn = FontId::new(BUTTON_FONT_SIZE, FontFamily::Proportional);
+    for (r, lbl) in [(&x_resp, egui_phosphor::regular::X), (&gear_resp, egui_phosphor::regular::GEAR)] {
         let col = if r.hovered() { Color32::WHITE } else { colors.btn };
         let g = ui.fonts(|f| f.layout_no_wrap(lbl.into(), f_btn.clone(), col));
         let pos = r.rect.min + (r.rect.size() - g.size()) / 2.0;

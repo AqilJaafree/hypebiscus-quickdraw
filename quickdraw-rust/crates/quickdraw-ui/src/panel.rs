@@ -14,8 +14,7 @@ pub fn draw_panel_content(
     wallet_ui: &mut WalletUiState,
     ctx: &egui::Context,
 ) {
-    let session_label = session_label();
-    draw_panel(ui, snap, cmd_tx, &session_label, wallet_ui, ctx);
+    draw_panel(ui, snap, cmd_tx, wallet_ui, ctx);
 }
 
 const DARK_BG:     egui::Color32 = egui::Color32::from_rgb(0x18, 0x18, 0x18);
@@ -27,16 +26,18 @@ fn draw_panel(
     ui: &mut egui::Ui,
     snap: &AppSnapshot,
     cmd_tx: &mpsc::Sender<Command>,
-    session_label: &str,
     wallet_ui: &mut WalletUiState,
     ctx: &egui::Context,
 ) {
-    // Drag zone (left 75%, registered before header so X button keeps priority)
+    // Drag zone — same Wayland serial fix: check pointer position on press frame
     let drag_rect = egui::Rect::from_min_size(
         ui.cursor().min,
         egui::vec2(Tokens::PANEL_WIDTH * 0.75, 36.0),
     );
-    if ui.interact(drag_rect, egui::Id::new("panel_drag"), egui::Sense::drag()).drag_started() {
+    let in_zone = ui.input(|i| i.pointer.hover_pos().map_or(false, |p| drag_rect.contains(p)));
+    let just_pressed = ui.input(|i| i.pointer.primary_pressed());
+    let dr = ui.interact(drag_rect, egui::Id::new("panel_drag"), egui::Sense::drag());
+    if (in_zone && just_pressed) || dr.drag_started() {
         ui.ctx().send_viewport_cmd(egui::ViewportCommand::StartDrag);
     }
 
@@ -53,7 +54,7 @@ fn draw_panel(
                 );
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if ui.add(
-                        egui::Button::new(RichText::new("X").size(13.0)
+                        egui::Button::new(RichText::new(egui_phosphor::regular::X).size(14.0)
                             .color(egui::Color32::from_rgb(0x55, 0x55, 0x55)))
                             .fill(egui::Color32::TRANSPARENT)
                             .stroke(egui::Stroke::NONE)
@@ -115,7 +116,7 @@ fn draw_panel(
                 .inner_margin(Margin::symmetric(12.0, 12.0))
                 .show(ui, |ui| {
                     match active {
-                        0 => draw_state_tab(ui, snap, cmd_tx, session_label, wallet_ui, ctx),
+                        0 => draw_state_tab(ui, snap, cmd_tx, wallet_ui, ctx),
                         _ => draw_skills_tab(ui),
                     }
                 });
@@ -138,7 +139,6 @@ fn draw_state_tab(
     ui: &mut egui::Ui,
     snap: &AppSnapshot,
     cmd_tx: &mpsc::Sender<Command>,
-    session_label: &str,
     wallet_ui: &mut WalletUiState,
     ctx: &egui::Context,
 ) {
@@ -170,7 +170,7 @@ fn draw_state_tab(
 
     slabel(ui, "STATS");
     srow(ui, "Last seen", snap.last_seen_ticker.as_deref().unwrap_or("—"));
-    srow(ui, "Session",   session_label);
+    srow(ui, "Session",   &session_label(ui));
     ui.add_space(10.0);
 
     slabel(ui, "AI MODE");
@@ -274,12 +274,20 @@ fn hsep(ui: &mut egui::Ui) {
     ui.painter().rect_filled(sep, 0.0, SEP);
 }
 
-fn session_label() -> String {
+fn session_label(ui: &egui::Ui) -> String {
     use std::sync::OnceLock;
     static START: OnceLock<Instant> = OnceLock::new();
     let start = START.get_or_init(Instant::now);
     let secs = start.elapsed().as_secs();
-    if secs < 60        { format!("{}s", secs) }
-    else if secs < 3600 { format!("{}m {}s", secs / 60, secs % 60) }
-    else                { format!("{}h {}m", secs / 3600, (secs % 3600) / 60) }
+
+    let id = egui::Id::new("session_secs");
+    let cached: Option<(u64, String)> = ui.ctx().data(|d| d.get_temp(id));
+    if let Some((s, ref label)) = cached {
+        if s == secs { return label.clone(); }
+    }
+    let label = if secs < 60        { format!("{}s", secs) }
+                else if secs < 3600 { format!("{}m {}s", secs / 60, secs % 60) }
+                else                { format!("{}h {}m", secs / 3600, (secs % 3600) / 60) };
+    ui.ctx().data_mut(|d| d.insert_temp(id, (secs, label.clone())));
+    label
 }

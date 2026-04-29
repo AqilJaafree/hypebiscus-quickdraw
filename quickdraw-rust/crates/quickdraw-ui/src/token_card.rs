@@ -1,8 +1,8 @@
-use egui::{Color32, RichText, Ui};
+use egui::{RichText, Ui};
 use tokio::sync::mpsc;
 
 use quickdraw_core::{commands::Command, state::AppSnapshot};
-use crate::design::{body, heading, muted, mono, Colors};
+use crate::design::{body, muted, mono, Colors};
 use crate::widgets::{brutal_button, ghost_button, loading_row, safety_badge, separator_dark};
 
 /// Which swap adapter the user has pinned (persists while card is open).
@@ -106,7 +106,7 @@ pub fn show_token_card(ui: &mut Ui, snap: &AppSnapshot, cmd_tx: &mpsc::Sender<Co
         // ── Inline swap panel ────────────────────────────────────────────────
         if card.show_swap {
             separator_dark(ui);
-            crate::swap_ui::show_swap_panel(ui, snap, cmd_tx, &mut card.selected_quote_idx);
+            crate::swap_ui::show_swap_panel(ui, snap, cmd_tx);
         }
 
         // ── Inline chart panel ───────────────────────────────────────────────
