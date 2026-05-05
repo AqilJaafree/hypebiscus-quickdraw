@@ -1,7 +1,6 @@
 use crate::commands::Command;
-use crate::events::AppEvent;
 use crate::state::{AppState, QuickdrawState};
-use crate::types::{AdapterQuote, DetectionSource, Point};
+use crate::types::{AdapterQuote, Point};
 
 /// What the engine needs done — interpreted by the actor layer, never by the engine itself.
 #[derive(Debug)]
@@ -12,12 +11,23 @@ pub enum SideEffect {
     DispatchAiNarration { address: solana_sdk::pubkey::Pubkey },
     ShowOverlay { position: Point },
     DismissOverlay,
-    SignTransaction { tx_bytes: Vec<u8>, selected_quote: AdapterQuote },
+    SignTransaction { selected_quote: AdapterQuote },
     OpenWalletConnect,
     FetchYield { wallet: solana_sdk::pubkey::Pubkey },
     StartAudioCapture,
     StopAudioCapture,
     Shutdown,
+}
+
+fn dismiss_overlay(state: &mut AppState) {
+    state.fsm = QuickdrawState::Idle;
+    state.overlay_visible = false;
+    state.token_address = None;
+    state.safety_report = None;
+    state.token_price = None;
+    state.quotes = Vec::new();
+    state.ai_narration = None;
+    state.version += 1;
 }
 
 /// Pure FSM transition — given a command and current state, produce the next state + side effects.
@@ -58,15 +68,7 @@ pub fn process(state: &mut AppState, cmd: Command) -> Vec<SideEffect> {
         }
 
         Command::DismissOverlay => {
-            state.fsm = QuickdrawState::Idle;
-            state.overlay_visible = false;
-            state.token_address = None;
-            state.safety_report = None;
-            state.token_price = None;
-            state.quotes = Vec::new();
-            state.ai_narration = None;
-            state.version += 1;
-
+            dismiss_overlay(state);
             vec![SideEffect::DismissOverlay]
         }
 
@@ -78,6 +80,7 @@ pub fn process(state: &mut AppState, cmd: Command) -> Vec<SideEffect> {
                 quotes: Vec::new(),
             };
             state.quotes = Vec::new();
+            state.quote_error = None;
             state.version += 1;
 
             vec![SideEffect::FetchQuotes { token_in, token_out, amount }]
@@ -93,11 +96,8 @@ pub fn process(state: &mut AppState, cmd: Command) -> Vec<SideEffect> {
         }
 
         Command::ConfirmSwap => {
-            if let QuickdrawState::AwaitingSwapConfirm { selected_quote, unsigned_tx } = &state.fsm {
-                let fx = SideEffect::SignTransaction {
-                    tx_bytes: unsigned_tx.clone(),
-                    selected_quote: selected_quote.clone(),
-                };
+            if let QuickdrawState::AwaitingSwapConfirm { selected_quote, .. } = &state.fsm {
+                let fx = SideEffect::SignTransaction { selected_quote: selected_quote.clone() };
                 state.fsm = QuickdrawState::AwaitingWalletSign;
                 state.version += 1;
                 vec![fx]
@@ -107,9 +107,7 @@ pub fn process(state: &mut AppState, cmd: Command) -> Vec<SideEffect> {
         }
 
         Command::CancelSwap => {
-            state.fsm = QuickdrawState::Idle;
-            state.overlay_visible = false;
-            state.version += 1;
+            dismiss_overlay(state);
             vec![SideEffect::DismissOverlay]
         }
 
@@ -125,6 +123,12 @@ pub fn process(state: &mut AppState, cmd: Command) -> Vec<SideEffect> {
 
         Command::WalletConnected(pubkey) => {
             state.wallet_pubkey = Some(pubkey);
+            state.version += 1;
+            vec![]
+        }
+
+        Command::SwapSigned(sig) => {
+            state.swap_signature = Some(sig);
             state.version += 1;
             vec![]
         }
@@ -188,6 +192,7 @@ mod tests {
 
     fn make_detection() -> Command {
         use solana_sdk::pubkey::Pubkey;
+        use crate::types::DetectionSource;
         Command::TokenDetected(DetectionEvent {
             address: Pubkey::default(),
             position: Point { x: 100.0, y: 200.0 },

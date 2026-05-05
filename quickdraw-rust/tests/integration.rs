@@ -1,6 +1,5 @@
 /// End-to-end integration tests that hit real public APIs.
 /// Run with: cargo test --test integration -- --nocapture
-
 use std::sync::{Arc, RwLock};
 use tokio::sync::{broadcast, mpsc};
 use quickdraw_core::{
@@ -53,7 +52,7 @@ async fn rugcheck_safety_fetch() {
 async fn engine_token_detected_updates_snapshot() {
     let snapshot = Arc::new(RwLock::new(AppSnapshot::default()));
     let (cmd_tx, mut cmd_rx) = mpsc::channel::<Command>(16);
-    let (internal_tx, mut internal_rx) = mpsc::channel::<AppEvent>(16);
+    let (_internal_tx, _internal_rx) = mpsc::channel::<AppEvent>(16);
     let (event_tx, _) = broadcast::channel::<AppEvent>(16);
 
     // Minimal engine loop for the test

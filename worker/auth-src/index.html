@@ -24,8 +24,14 @@
 </head>
 <body>
   <div class="card">
-    <h1>QUICKDRAW</h1>
-    <p>Sign in with email, Google, or Apple.<br>Your Solana wallet is created automatically.</p>
+    <h1 id="page-title">QUICKDRAW</h1>
+    <p id="page-desc">Sign in with email, Google, or Apple.<br>Your Solana wallet is created automatically.</p>
+    <script>
+      if (new URLSearchParams(location.search).has('sign')) {
+        document.getElementById('page-title').textContent = 'APPROVE SWAP'
+        document.getElementById('page-desc').textContent  = 'Review and approve the Jupiter swap in your wallet.'
+      }
+    </script>
     <div id="status"></div>
   </div>
   <script type="module" src="./main.js"></script>

@@ -18,6 +18,7 @@ pub enum Command {
     ConnectWallet,
     DisconnectWallet,
     WalletConnected(Pubkey),
+    SwapSigned(String),
     FetchYield,
     Shutdown,
 }

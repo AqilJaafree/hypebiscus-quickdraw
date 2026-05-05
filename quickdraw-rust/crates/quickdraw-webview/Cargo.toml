@@ -1,0 +1,13 @@
+[package]
+name = "quickdraw-webview"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "quickdraw-webview"
+path = "src/main.rs"
+
+[dependencies]
+gtk     = { version = "0.18", features = ["v3_24"] }
+webkit2gtk = { version = "2.0", features = ["v2_38"] }
+glib    = "0.18"

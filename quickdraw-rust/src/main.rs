@@ -1,4 +1,4 @@
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, OnceLock, RwLock};
 use anyhow::Result;
 use tokio::sync::mpsc;
 use tracing::{info, warn};
@@ -41,9 +41,10 @@ fn main() -> Result<()> {
 
     // Remove WAYLAND_DISPLAY so winit uses X11 (XWayland) for rendering. Wayland rendering
     // on GNOME Mutter causes screen-wide flicker due to frame-timing conflicts.
-    // XWayland is stable and Mutter composites it cleanly. arboard clipboard detection
-    // auto-detects X11 and reads PRIMARY/CLIPBOARD selections natively via xlib.
-    if std::env::var("WAYLAND_DISPLAY").is_ok() {
+    // Save the value first so spawn_webview_popup can restore it for the child —
+    // webkit2gtk renders correctly as a native Wayland client.
+    if let Ok(wd) = std::env::var("WAYLAND_DISPLAY") {
+        SAVED_WAYLAND_DISPLAY.set(wd).ok();
         std::env::remove_var("WAYLAND_DISPLAY");
         info!("Using XWayland for rendering (WAYLAND_DISPLAY cleared for winit)");
     }
@@ -54,10 +55,12 @@ fn main() -> Result<()> {
         .build()?;
 
     // Shared snapshot — UI reads this, fetch tasks write directly to it.
-    // Use AppState::default().snapshot() so detection_enabled=true from the start.
-    let mut initial_state = AppState::default();
-    if settings_mode { initial_state.settings_visible = true; }
-    let initial = if demo_mode { quickdraw_ui::app::demo_snapshot() } else { initial_state.snapshot() };
+    // engine_task owns AppState and is the source of truth; initial snapshot matches.
+    let initial = if demo_mode { quickdraw_ui::app::demo_snapshot() } else {
+        let mut s = AppState::default();
+        if settings_mode { s.settings_visible = true; }
+        s.snapshot()
+    };
     let snapshot: Arc<RwLock<AppSnapshot>> = Arc::new(RwLock::new(initial));
 
     // Single command channel: UI → engine
@@ -171,7 +174,7 @@ async fn engine_task(
     repaint_tx: std::sync::mpsc::Sender<()>,
     settings_mode: bool,
 ) {
-    println!("ENGINE: started");
+    info!("ENGINE: started");
 
     let mut state = AppState::default();
     if settings_mode { state.settings_visible = true; }
@@ -209,13 +212,14 @@ async fn engine_task(
             Command::ConnectWallet       => "ConnectWallet".into(),
             Command::DisconnectWallet    => "DisconnectWallet".into(),
             Command::WalletConnected(pk) => format!("WalletConnected({})", pk),
+            Command::SwapSigned(sig)     => format!("SwapSigned({}..)", &sig[..8.min(sig.len())]),
             Command::FetchYield          => "FetchYield".into(),
             Command::Shutdown            => "Shutdown".into(),
         };
-        println!("ENGINE: {cmd_name}");
+        info!("ENGINE: {cmd_name}");
 
         let effects = pipeline::process(&mut state, cmd);
-        println!("ENGINE: overlay={} effects={}", state.overlay_visible, effects.len());
+        info!("ENGINE: overlay={} effects={}", state.overlay_visible, effects.len());
 
         // Publish snapshot
         *snapshot.write().unwrap() = state.snapshot();
@@ -227,13 +231,14 @@ async fn engine_task(
         }
     }
 
-    println!("ENGINE: cmd_rx closed — exiting");
+    info!("ENGINE: cmd_rx closed — exiting");
 }
 
 fn default_safety_report() -> quickdraw_core::types::SafetyReport {
     quickdraw_core::types::SafetyReport {
         score: 0,
         ticker: None,
+        decimals: 6,
         jupiter_listed: false,
         mint_authority_disabled: false,
         freeze_authority_disabled: false,
@@ -391,13 +396,85 @@ fn dispatch_effect(
             }
         }
 
+        SideEffect::FetchQuotes { token_in, token_out, amount } => {
+            let snap = snapshot.clone();
+            let rep  = repaint_tx.clone();
+            tokio::spawn(async move {
+                use quickdraw_defi::adapters::jupiter::JupiterAdapter;
+                use quickdraw_defi::adapter::DefiAdapter;
+                let adapter = JupiterAdapter::new();
+                match adapter.get_quote(token_in, token_out, amount).await {
+                    Ok(quote) => {
+                        update_if_current(&snap, token_out, &rep, |s| {
+                            s.quotes = vec![quote];
+                            s.quote_error = None;
+                        });
+                    }
+                    Err(e) => {
+                        warn!("FetchQuotes failed: {e}");
+                        push_quote_error(&snap, &rep, format!("Quote failed: {e}"));
+                    }
+                }
+            });
+        }
+
+        SideEffect::SignTransaction { selected_quote } => {
+            let snap = snapshot.clone();
+            let rep  = repaint_tx.clone();
+            tokio::spawn(async move {
+                use quickdraw_defi::adapters::jupiter::JupiterAdapter;
+                use quickdraw_defi::adapter::DefiAdapter;
+
+                let wallet = snap.read().unwrap().wallet_pubkey;
+                let Some(wallet) = wallet else {
+                    push_quote_error(&snap, &rep, "No wallet connected".into());
+                    return;
+                };
+
+                // Build the unsigned transaction via Jupiter /swap
+                let adapter = JupiterAdapter::new();
+                let raw_tx = match adapter.build_transaction(&selected_quote, wallet).await {
+                    Ok(b) => b,
+                    Err(e) => {
+                        warn!("build_transaction: {e}");
+                        push_quote_error(&snap, &rep, format!("Build tx failed: {e}"));
+                        return;
+                    }
+                };
+
+                // Encode as base64 and open the browser to sign.
+                // The auth page calls signAndSendTransaction via Reown AppKit,
+                // then redirects to /sign-result?sig=<signature>.
+                let tx_b64 = base64::Engine::encode(
+                    &base64::engine::general_purpose::STANDARD,
+                    &raw_tx,
+                );
+                let auth_url = std::env::var("REOWN_AUTH_URL")
+                    .unwrap_or_else(|_| "http://localhost:5173".into());
+                let callback = format!("http://127.0.0.1:{AUTH_CALLBACK_PORT}");
+                let sign_url = format!(
+                    "{auth_url}?sign={tx_b64}&callback={callback}"
+                );
+
+                // Signing always goes to the system browser — Phantom, Solflare, and other
+                // browser extensions inject into the system browser but not into a custom
+                // GTK webview. The callback server on port 9427 receives the signature
+                // regardless of which context the page runs in.
+                info!("Opening system browser for wallet signing");
+                if let Err(e) = open::that(&sign_url) {
+                    push_quote_error(&snap, &rep, format!("Could not open browser: {e}"));
+                }
+                // Signature arrives via Command::SwapSigned from auth_callback_server
+            });
+        }
+
         SideEffect::ShowOverlay { .. } | SideEffect::DismissOverlay => {
             // Already handled by FSM state — snapshot was published above
             let _ = repaint_tx.send(());
         }
 
         SideEffect::Shutdown => {
-            println!("ENGINE: shutdown");
+            info!("ENGINE: shutdown");
             std::process::exit(0);
         }
 
@@ -420,6 +497,7 @@ async fn fetch_jupiter_safety(http: &reqwest::Client, token: Pubkey) -> Result<q
     #[derive(serde::Deserialize)]
     struct JupToken {
         symbol:                                Option<String>,
+        decimals:                              Option<u8>,
         #[serde(rename = "isVerified")]        is_verified:    Option<bool>,
         liquidity:                             Option<f64>,
         #[serde(rename = "organicScore")]      organic_score:  Option<f64>,
@@ -439,6 +517,7 @@ async fn fetch_jupiter_safety(http: &reqwest::Client, token: Pubkey) -> Result<q
 
     let t = results.into_iter().next().unwrap_or(JupToken {
         symbol: None,
+        decimals: None,
         is_verified: Some(false),
         liquidity: None,
         organic_score: None,
@@ -463,6 +542,7 @@ async fn fetch_jupiter_safety(http: &reqwest::Client, token: Pubkey) -> Result<q
     Ok(quickdraw_core::types::SafetyReport {
         score,
         ticker: t.symbol,
+        decimals: t.decimals.unwrap_or(6),
         jupiter_listed,
         mint_authority_disabled: mint_auth_off,
         freeze_authority_disabled: freeze_auth_off,
@@ -645,30 +725,70 @@ async fn auth_callback_server(cmd_tx: mpsc::Sender<Command>) {
         let cmd_tx = cmd_tx.clone();
 
         tokio::spawn(async move {
-            let mut buf = vec![0u8; 1024];
-            let n = stream.read(&mut buf).await.unwrap_or(0);
-            let req = String::from_utf8_lossy(&buf[..n]);
+            let mut buf = Vec::with_capacity(4096);
+            let mut tmp = [0u8; 1024];
+            loop {
+                let n = stream.read(&mut tmp).await.unwrap_or(0);
+                if n == 0 { break; }
+                buf.extend_from_slice(&tmp[..n]);
+                if buf.windows(4).any(|w| w == b"\r\n\r\n") { break; }
+                if buf.len() > 16_384 { break; }
+            }
+            let req = String::from_utf8_lossy(&buf);
 
-            // Parse "GET /callback?address=<pubkey> HTTP/1.1"
-            let address = req
-                .lines()
-                .next()
-                .and_then(|line| line.split_whitespace().nth(1))
-                .and_then(|path| path.strip_prefix("/callback?address="))
-                .and_then(|addr| addr.split('&').next())
-                .and_then(|addr| addr.parse::<Pubkey>().ok());
+            // Parse request line: "GET /path?query HTTP/1.1"
+            let first_line = req.lines().next().unwrap_or("");
+            let method = first_line.split_whitespace().next().unwrap_or("GET");
+            let path   = first_line.split_whitespace().nth(1).unwrap_or("");
 
-            let (status, body) = if let Some(pubkey) = address {
-                info!("Reown auth: wallet connected {pubkey}");
-                let _ = cmd_tx.send(Command::WalletConnected(pubkey)).await;
-                ("200 OK", "Connected! You can close this tab.")
+            // Chrome Private Network Access sends an OPTIONS preflight before
+            // allowing fetch() from a public HTTPS page to http://127.0.0.1.
+            // Restrict Allow-Origin to the Pages domain so arbitrary websites
+            // cannot trigger wallet-connect or disconnect callbacks.
+            let auth_origin = std::env::var("REOWN_AUTH_URL")
+                .unwrap_or_else(|_| "https://quickdraw-auth.pages.dev".into());
+            if method == "OPTIONS" {
+                let preflight = format!(
+                    "HTTP/1.1 200 OK\r\nAccess-Control-Allow-Origin: {auth_origin}\r\nAccess-Control-Allow-Private-Network: true\r\nAccess-Control-Allow-Methods: GET, OPTIONS\r\nAccess-Control-Allow-Headers: *\r\nContent-Length: 0\r\n\r\n"
+                );
+                let _ = stream.write_all(preflight.as_bytes()).await;
+                return;
+            }
+
+            let (status, body) = if let Some(rest) = path.strip_prefix("/callback?address=") {
+                // Wallet connect callback
+                let addr_str = rest.split('&').next().unwrap_or("");
+                if let Ok(pubkey) = addr_str.parse::<Pubkey>() {
+                    info!("Reown auth: wallet connected {pubkey}");
+                    let _ = cmd_tx.send(Command::WalletConnected(pubkey)).await;
+                    ("200 OK", "Connected! You can close this tab.")
+                } else {
+                    ("400 Bad Request", "Invalid address.")
+                }
+            } else if let Some(rest) = path.strip_prefix("/sign-result?sig=") {
+                // Transaction signing callback — browser signed and sent the tx
+                let sig = rest.split('&').next().unwrap_or("").to_string();
+                if !sig.is_empty() {
+                    info!("Swap signed: {sig}");
+                    let _ = cmd_tx.send(Command::SwapSigned(sig)).await;
+                    ("200 OK", "Signed! You can close this tab.")
+                } else {
+                    ("400 Bad Request", "Missing signature.")
+                }
+            } else if path == "/disconnect" || path.starts_with("/disconnect?") {
+                info!("Reown auth: wallet disconnect callback");
+                let _ = cmd_tx.send(Command::DisconnectWallet).await;
+                ("200 OK", "Disconnected. You can close this tab.")
             } else {
-                ("400 Bad Request", "Missing or invalid address.")
+                ("400 Bad Request", "Unknown callback.")
             };
 
-            // Minimal HTTP response with CORS so the browser page can fetch it
+            // Minimal HTTP response with CORS so the Pages auth site can fetch() it.
+            // Cache-Control: no-store prevents the browser from caching the callback
+            // URL — a cached /callback?address=<old> would replay WalletConnected(old)
+            // on tab restore or accidental refresh, overwriting the correct wallet.
             let response = format!(
-                "HTTP/1.1 {status}\r\nContent-Type: text/plain\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: {}\r\n\r\n{body}",
+                "HTTP/1.1 {status}\r\nContent-Type: text/plain\r\nAccess-Control-Allow-Origin: {auth_origin}\r\nCache-Control: no-store\r\nContent-Length: {}\r\n\r\n{body}",
                 body.len()
             );
             let _ = stream.write_all(response.as_bytes()).await;
@@ -676,18 +796,109 @@ async fn auth_callback_server(cmd_tx: mpsc::Sender<Command>) {
     }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Helpers
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Write an error into the snapshot's quote_error field and trigger a repaint.
+fn push_quote_error(
+    snapshot: &Arc<RwLock<AppSnapshot>>,
+    repaint: &std::sync::mpsc::Sender<()>,
+    msg: String,
+) {
+    let mut s = snapshot.write().unwrap();
+    s.quote_error = Some(msg);
+    s.version += 1;
+    let _ = repaint.send(());
+}
+
 /// Called by the engine when Command::ConnectWallet is received.
-/// Opens the system browser to the Reown auth page.
+/// Opens the Reown auth page in a chromeless webview popup (falls back to
+/// the system browser if the quickdraw-webview binary isn't found).
 pub fn open_reown_auth_browser(worker_url: &str) {
     let project_id = std::env::var("REOWN_PROJECT_ID").unwrap_or_default();
     let callback   = format!("http://127.0.0.1:{AUTH_CALLBACK_PORT}");
-    // Use dedicated Pages site for auth (avoids HMAC/routing complexity in the Worker)
     let auth_base  = std::env::var("REOWN_AUTH_URL")
         .unwrap_or_else(|_| format!("{worker_url}/auth"));
     let url = format!("{auth_base}?projectId={project_id}&callback={callback}");
-    info!("Opening Reown auth: {url}");
-    if let Err(e) = open::that(&url) {
-        warn!("could not open browser: {e}");
+    info!("Opening Reown auth popup: {url}");
+    if let Err(e) = spawn_webview_popup(&url) {
+        warn!("webview popup failed ({e}), falling back to system browser");
+        if let Err(e2) = open::that(&url) {
+            warn!("could not open browser either: {e2}");
+        }
     }
+}
+
+/// Wayland socket saved before we remove WAYLAND_DISPLAY for winit.
+/// Restored when spawning the webview child so webkit2gtk can use native Wayland.
+static SAVED_WAYLAND_DISPLAY: OnceLock<String> = OnceLock::new();
+
+/// Persistent webview process handle.
+/// Re-used across connect and sign flows so localStorage (AUTH session) survives.
+struct WebviewHandle {
+    child: std::process::Child,
+    stdin: std::process::ChildStdin,
+}
+
+static WEBVIEW_HANDLE: OnceLock<std::sync::Mutex<Option<WebviewHandle>>> = OnceLock::new();
+
+fn webview_mutex() -> &'static std::sync::Mutex<Option<WebviewHandle>> {
+    WEBVIEW_HANDLE.get_or_init(|| std::sync::Mutex::new(None))
+}
+
+/// Show the webview popup for the given URL.
+/// First call spawns the process; subsequent calls send the URL via stdin
+/// so the existing process reuses its localStorage session.
+fn spawn_webview_popup(url: &str) -> std::io::Result<()> {
+    use std::io::Write;
+
+    let exe_dir = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|p| p.to_path_buf()))
+        .unwrap_or_default();
+    let bin = exe_dir.join("quickdraw-webview");
+    if !bin.exists() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            format!("quickdraw-webview not found at {}", bin.display()),
+        ));
+    }
+
+    let mut guard = webview_mutex().lock().unwrap();
+
+    // Try to reuse an existing live process by sending URL via stdin.
+    if let Some(ref mut handle) = *guard {
+        match handle.child.try_wait() {
+            Ok(None) => {
+                // Process still alive — send URL via stdin.
+                let line = format!("{url}\n");
+                if handle.stdin.write_all(line.as_bytes()).is_ok() {
+                    return Ok(());
+                }
+                // Write failed — process died between the check and write.
+            }
+            _ => {} // Exited — fall through to respawn.
+        }
+        *guard = None;
+    }
+
+    // Spawn a fresh process. First URL comes as argv[1]; subsequent ones via stdin.
+    let mut cmd = std::process::Command::new(&bin);
+    cmd.arg(url)
+       .stdin(std::process::Stdio::piped())
+       .stderr(std::process::Stdio::inherit());
+    // Restore the Wayland socket — main process removed it to force winit into
+    // X11 mode, but webkit2gtk needs it to render on the Wayland compositor.
+    if let Some(wd) = SAVED_WAYLAND_DISPLAY.get() {
+        cmd.env("WAYLAND_DISPLAY", wd);
+    }
+
+    let mut child = cmd.spawn()?;
+    let stdin = child.stdin.take().ok_or_else(|| {
+        std::io::Error::new(std::io::ErrorKind::Other, "could not get webview stdin")
+    })?;
+    *guard = Some(WebviewHandle { child, stdin });
+    Ok(())
 }
 

@@ -54,22 +54,25 @@ async function verifyHmac(req: Request, secret: string): Promise<boolean> {
   const now = Math.floor(Date.now() / 1000);
   if (Math.abs(now - parseInt(ts, 10)) > ALLOWED_CLOCK_SKEW_SECS) return false;
 
-  const url   = new URL(req.url);
-  const msg   = `${ts}.${url.pathname}`;
-  const key   = await crypto.subtle.importKey(
+  const url = new URL(req.url);
+  const msg = `${ts}.${url.pathname}`;
+  const enc = new TextEncoder();
+
+  const key = await crypto.subtle.importKey(
     "raw",
-    new TextEncoder().encode(secret),
+    enc.encode(secret),
     { name: "HMAC", hash: "SHA-256" },
     false,
-    ["sign"],
+    ["verify"],
   );
-  const expected = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(msg));
-  const expectedHex = Array.from(new Uint8Array(expected))
-    .map(b => b.toString(16).padStart(2, "0"))
-    .join("");
 
-  // Constant-time comparison
-  return expectedHex === sig;
+  // Decode hex sig header back to raw bytes
+  const hexPairs = sig.match(/.{2}/g) ?? [];
+  if (hexPairs.length !== 32) return false; // SHA-256 = 32 bytes
+  const sigBytes = new Uint8Array(hexPairs.map(b => parseInt(b, 16)));
+
+  // crypto.subtle.verify performs constant-time HMAC comparison
+  return crypto.subtle.verify("HMAC", key, sigBytes, enc.encode(msg));
 }
 
 // ─────────────────────────── Rate limiting ────────────────────────────────────

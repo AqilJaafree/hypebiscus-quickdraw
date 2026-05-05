@@ -4,6 +4,9 @@ use tokio::sync::mpsc;
 use quickdraw_core::{commands::Command, state::AppSnapshot};
 use crate::design::Colors;
 
+// Wrapped SOL mint — token_in for all BUY swaps
+const SOL_MINT: &str = "So11111111111111111111111111111111111111112";
+
 // ── Shared colors ────────────────────────────────────────────────────────────
 const SWAP_BG:          Color32 = Color32::from_rgb(0x0D, 0x0D, 0x0D);
 const INPUT_BG:         Color32 = Color32::from_rgb(0x1E, 0x1E, 0x1E);
@@ -36,9 +39,12 @@ pub enum SwapUiStatus {
 
 #[derive(Clone, Default)]
 pub struct SwapUiState {
-    pub amount_str:   String,
-    pub status:       SwapUiStatus,
-    pub last_fetched: String,
+    pub amount_str:       String,
+    pub status:           SwapUiStatus,
+    pub last_fetched:     String,
+    pub last_input_time:  f64,  // egui time of most recent keystroke
+    pub pending_fetch:    bool, // debounce: fetch queued but not yet sent
+    pub confirming_since: f64,  // egui time when Confirming started (0 = not set)
 }
 
 pub fn show_swap_panel(
@@ -176,9 +182,10 @@ pub fn show_swap_panel(
                                             .frame(false)
                                             .hint_text("0.0");
                                         if ui.add(te).changed() {
-                                            if has_amount && state.amount_str != state.last_fetched {
-                                                state.status = SwapUiStatus::Fetching;
-                                            }
+                                            // Record keystroke time; fire fetch after 400 ms debounce
+                                            state.last_input_time = ui.input(|i| i.time);
+                                            state.pending_fetch = true;
+                                            state.status = SwapUiStatus::Idle;
                                         }
                                     }
                                     ui.label(RichText::new("SOL").size(10.0).monospace().color(sol_color));
@@ -209,6 +216,7 @@ pub fn show_swap_panel(
                                 if max_btn.clicked() {
                                     state.amount_str = "0.5".to_owned();
                                     state.status = SwapUiStatus::Fetching;
+                                    dispatch_fetch_quotes(&state.amount_str, snap, cmd_tx);
                                 }
                             });
                     });
@@ -223,9 +231,19 @@ pub fn show_swap_panel(
                     if show_quote {
                         if let Some(q) = snap.quotes.first() {
                             let impact_color = if q.price_impact_pct > 2.0 { Colors::DANGER } else { TEXT_QUOTE };
+                            // Use decimals from the safety report; fall back to 6 (most SPL tokens)
+                            let decimals = snap.safety_report.as_ref()
+                                .map(|r| r.decimals)
+                                .unwrap_or(6);
+                            let out_human = q.out_amount as f64 / 10f64.powi(decimals as i32);
+                            let out_str = if decimals <= 2 {
+                                format!("{:.0}", out_human)
+                            } else {
+                                format!("{:.4}", out_human)
+                            };
                             ui.vertical(|ui| {
                                 ui.label(
-                                    RichText::new(format!("~{} {}", q.out_amount, ticker))
+                                    RichText::new(format!("~{} {}", out_str, ticker))
                                         .size(12.0).strong().monospace().color(Color32::WHITE),
                                 );
                                 ui.horizontal(|ui| {
@@ -277,8 +295,14 @@ pub fn show_swap_panel(
                         if let SwapUiStatus::Error(_) = &state.status {
                             state.status = SwapUiStatus::Fetching;
                         } else if state.status == SwapUiStatus::Ready {
+                            if let Some(quote) = snap.quotes.first() {
+                                // SelectQuote moves FSM to AwaitingSwapConfirm; ConfirmSwap
+                                // then emits SideEffect::SignTransaction from that state.
+                                let _ = cmd_tx.try_send(Command::SelectQuote(quote.clone()));
+                                let _ = cmd_tx.try_send(Command::ConfirmSwap);
+                            }
                             state.status = SwapUiStatus::Confirming;
-                            let _ = cmd_tx.try_send(Command::ConfirmSwap);
+                            state.confirming_since = ui.input(|i| i.time);
                         }
                     }
 
@@ -292,7 +316,14 @@ pub fn show_swap_panel(
                             }
                             SwapUiStatus::Success => {
                                 ui.with_layout(egui::Layout::top_down(egui::Align::Center), |ui| {
-                                    ui.label(RichText::new("Tx confirmed ↗ (Solscan)").size(9.0).monospace().color(Colors::SAFE));
+                                    if let Some(ref sig) = snap.swap_signature {
+                                        ui.hyperlink_to(
+                                            RichText::new("✓ View on Solscan ↗").size(9.0).monospace().color(Colors::SAFE),
+                                            format!("https://solscan.io/tx/{sig}"),
+                                        );
+                                    } else {
+                                        ui.label(RichText::new("✓ Tx confirmed").size(9.0).monospace().color(Colors::SAFE));
+                                    }
                                 });
                             }
                             SwapUiStatus::Error(msg) => {
@@ -311,6 +342,61 @@ pub fn show_swap_panel(
         state.last_fetched = state.amount_str.clone();
         state.status = SwapUiStatus::Ready;
     }
+    // Transition: quote fetch failed → error
+    if state.status == SwapUiStatus::Fetching {
+        if let Some(ref err) = snap.quote_error {
+            state.status = SwapUiStatus::Error(err.clone());
+        }
+    }
+    // Transition: swap submitted → success
+    if state.status == SwapUiStatus::Confirming && snap.swap_signature.is_some() {
+        state.status = SwapUiStatus::Success;
+    }
+    // Transition: confirming timed out (browser closed / signing rejected) → error
+    if state.status == SwapUiStatus::Confirming && state.confirming_since > 0.0 {
+        let now = ui.input(|i| i.time);
+        if now - state.confirming_since > 90.0 {
+            state.status = SwapUiStatus::Error("Sign timed out — try again".into());
+            state.confirming_since = 0.0;
+        } else {
+            ui.ctx().request_repaint_after(std::time::Duration::from_secs(5));
+        }
+    }
+    // Debounce: fire fetch 400 ms after last keystroke
+    if state.pending_fetch {
+        let now = ui.input(|i| i.time);
+        let has_valid_amount = !state.amount_str.is_empty()
+            && state.amount_str.parse::<f64>().map(|v| v > 0.0).unwrap_or(false);
+        if now - state.last_input_time >= 0.4 {
+            state.pending_fetch = false;
+            if has_valid_amount && state.amount_str != state.last_fetched {
+                state.status = SwapUiStatus::Fetching;
+                dispatch_fetch_quotes(&state.amount_str, snap, cmd_tx);
+            }
+        } else {
+            ui.ctx().request_repaint_after(std::time::Duration::from_millis(80));
+        }
+    }
 
     ui.ctx().data_mut(|d| d.insert_temp(state_id, state));
+}
+
+/// Parse the SOL amount string and send FetchQuotes to the engine.
+fn dispatch_fetch_quotes(
+    amount_str: &str,
+    snap: &AppSnapshot,
+    cmd_tx: &mpsc::Sender<Command>,
+) {
+    let Some(token_out) = snap.token_address else { return };
+    let Ok(sol) = amount_str.parse::<f64>() else { return };
+    if sol <= 0.0 { return; }
+
+    let Ok(token_in) = SOL_MINT.parse::<solana_sdk::pubkey::Pubkey>() else { return };
+    let lamports = (sol * 1_000_000_000.0) as u64;
+
+    let _ = cmd_tx.try_send(Command::FetchQuotes {
+        token_in,
+        token_out,
+        amount: lamports,
+    });
 }
