@@ -20,6 +20,7 @@ use zeroize::{Zeroize, ZeroizeOnDrop};
 use super::bridge::WalletBridge;
 
 // WalletConnect v2 relay (public relay — no auth needed for pairing)
+#[allow(dead_code)]
 const WC_RELAY: &str = "wss://relay.walletconnect.com";
 const WC_PROJECT_ID: &str = "REOWN_PROJECT_ID_PLACEHOLDER";
 

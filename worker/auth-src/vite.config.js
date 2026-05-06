@@ -7,9 +7,11 @@ export default defineConfig({
       '@reown/appkit-adapter-solana',
       '@solana/web3.js',
       '@solana/wallet-adapter-base',
+      '@wallet-standard/app',
     ],
   },
   build: {
+    outDir: 'auth-dist',
     target: 'es2020',
     commonjsOptions: { transformMixedEsModules: true },
     rollupOptions: {

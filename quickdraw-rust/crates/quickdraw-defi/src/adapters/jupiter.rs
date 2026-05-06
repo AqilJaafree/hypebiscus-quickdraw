@@ -4,12 +4,14 @@ use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use solana_sdk::pubkey::Pubkey;
 use std::time::Duration;
-use tracing::{debug, warn};
+use tracing::debug;
 
 use quickdraw_core::types::AdapterQuote;
 use crate::adapter::DefiAdapter;
 
-const JUPITER_API: &str = "https://quote-api.jup.ag/v6";
+// Jupiter Swap API v1 (current)
+const JUPITER_API: &str = "https://lite-api.jup.ag/swap/v1";
+const SOL_MINT:  &str = "So11111111111111111111111111111111111111112";
 const USDC_MINT: &str = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 
 #[derive(Debug, Deserialize)]
@@ -24,8 +26,6 @@ struct JupiterQuoteResponse {
     route_plan: Vec<RoutePlan>,
     #[serde(rename = "slippageBps")]
     slippage_bps: u16,
-    #[serde(rename = "platformFee")]
-    platform_fee: Option<PlatformFee>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -39,11 +39,6 @@ struct SwapInfo {
     label: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
-struct PlatformFee {
-    amount: Option<String>,
-}
-
 #[derive(Debug, Serialize)]
 struct JupiterSwapRequest {
     #[serde(rename = "quoteResponse")]
@@ -52,24 +47,17 @@ struct JupiterSwapRequest {
     user_public_key: String,
     #[serde(rename = "wrapAndUnwrapSol")]
     wrap_and_unwrap_sol: bool,
-    #[serde(rename = "computeUnitPriceMicroLamports")]
-    compute_unit_price_micro_lamports: u64,
+    #[serde(rename = "dynamicComputeUnitLimit")]
+    dynamic_compute_unit_limit: bool,
+    // "auto" lets Jupiter's Priority Fee API choose the optimal fee
+    #[serde(rename = "prioritizationFeeLamports")]
+    prioritization_fee_lamports: serde_json::Value,
 }
 
 #[derive(Debug, Deserialize)]
 struct JupiterSwapResponse {
     #[serde(rename = "swapTransaction")]
     swap_transaction: String,
-}
-
-#[derive(Debug, Deserialize)]
-struct JupiterPriceResponse {
-    data: std::collections::HashMap<String, TokenPriceData>,
-}
-
-#[derive(Debug, Deserialize)]
-struct TokenPriceData {
-    price: f64,
 }
 
 pub struct JupiterAdapter {
@@ -105,21 +93,24 @@ impl DefiAdapter for JupiterAdapter {
 
     async fn get_quote(&self, token_in: Pubkey, token_out: Pubkey, amount: u64) -> Result<AdapterQuote> {
         let url = format!(
-            "{}/quote?inputMint={}&outputMint={}&amount={}&slippageBps=50&onlyDirectRoutes=false",
+            "{}/quote?inputMint={}&outputMint={}&amount={}&slippageBps=50&onlyDirectRoutes=false&restrictIntermediateTokens=true",
             self.api_base, token_in, token_out, amount
         );
 
-        debug!("Jupiter quote request: {url}");
+        debug!("Jupiter quote: {url}");
 
         let resp = self.client.get(&url).send().await?;
         if !resp.status().is_success() {
             let status = resp.status();
             let body = resp.text().await.unwrap_or_default();
-            bail!("Jupiter API error {status}: {body}");
+            bail!("Jupiter quote error {status}: {body}");
         }
 
+        // Keep the raw JSON — /swap requires the full quoteResponse object
         let raw: serde_json::Value = resp.json().await?;
-        let quote: JupiterQuoteResponse = serde_json::from_value(raw.clone())?;
+        let raw_response = raw.to_string();
+
+        let quote: JupiterQuoteResponse = serde_json::from_value(raw)?;
 
         let route_label = quote.route_plan
             .first()
@@ -129,39 +120,36 @@ impl DefiAdapter for JupiterAdapter {
 
         Ok(AdapterQuote {
             adapter_name: "Jupiter".into(),
-            in_amount: quote.in_amount.parse().unwrap_or(amount),
-            out_amount: quote.out_amount.parse().unwrap_or(0),
+            token_in,
+            token_out,
+            in_amount:        quote.in_amount.parse().unwrap_or(amount),
+            out_amount:       quote.out_amount.parse().unwrap_or(0),
             price_impact_pct: quote.price_impact_pct.parse().unwrap_or(0.0),
-            slippage_bps: quote.slippage_bps,
-            fee_usd: 0.0, // platform fee in lamports, convert later
+            slippage_bps:     quote.slippage_bps,
+            fee_usd:          0.0,
             route_label,
+            raw_response,
         })
     }
 
     async fn build_transaction(&self, quote: &AdapterQuote, wallet: Pubkey) -> Result<Vec<u8>> {
-        // Re-fetch the raw quote to pass back to /swap
-        let url = format!(
-            "{}/quote?inputMint={}&outputMint={}&amount={}&slippageBps={}",
-            self.api_base,
-            // Use the amounts from the quote to reconstruct params
-            USDC_MINT, // placeholder — Phase 4 will pass full params
-            USDC_MINT,
-            quote.in_amount,
-            quote.slippage_bps,
-        );
+        let quote_response: serde_json::Value = serde_json::from_str(&quote.raw_response)
+            .map_err(|e| anyhow::anyhow!("invalid raw quote JSON: {e}"))?;
 
-        // Build swap transaction via Jupiter /swap endpoint
         let swap_url = format!("{}/swap", self.api_base);
-        let body = serde_json::json!({
-            "userPublicKey": wallet.to_string(),
-            "wrapAndUnwrapSol": true,
-            "computeUnitPriceMicroLamports": 1000,
-            // quoteResponse omitted here — needs the full raw quote object
-        });
+        let body = JupiterSwapRequest {
+            quote_response,
+            user_public_key: wallet.to_string(),
+            wrap_and_unwrap_sol: true,
+            dynamic_compute_unit_limit: true,
+            prioritization_fee_lamports: serde_json::json!("auto"),
+        };
 
         let resp = self.client.post(&swap_url).json(&body).send().await?;
         if !resp.status().is_success() {
-            bail!("Jupiter /swap error: {}", resp.status());
+            let status = resp.status();
+            let err = resp.text().await.unwrap_or_default();
+            bail!("Jupiter /swap error {status}: {err}");
         }
 
         let swap: JupiterSwapResponse = resp.json().await?;
@@ -174,23 +162,31 @@ impl DefiAdapter for JupiterAdapter {
     }
 
     async fn get_price(&self, token: Pubkey) -> Result<f64> {
-        let url = format!("{}/price?ids={}", self.api_base, token);
+        // Jupiter price API lives at a separate endpoint from the swap API
+        let url = format!("https://lite-api.jup.ag/price/v2?ids={}", token);
         let resp = self.client.get(&url).send().await?;
         if !resp.status().is_success() {
             bail!("Jupiter price API error: {}", resp.status());
         }
 
-        let price_resp: JupiterPriceResponse = resp.json().await?;
-        price_resp
-            .data
+        #[derive(Deserialize)]
+        struct PriceResp { data: std::collections::HashMap<String, TokenPrice> }
+        #[derive(Deserialize)]
+        struct TokenPrice { price: String }
+
+        let body: PriceResp = resp.json().await?;
+        body.data
             .get(&token.to_string())
-            .map(|d| d.price)
+            .and_then(|d| d.price.parse().ok())
             .ok_or_else(|| anyhow::anyhow!("token not found in Jupiter price response"))
     }
 
     async fn health_check(&self) -> bool {
-        let url = format!("{}/quote?inputMint={}&outputMint={}&amount=1000000&slippageBps=50",
-            self.api_base, USDC_MINT, USDC_MINT);
+        // SOL → USDC quote with 1 SOL (1_000_000_000 lamports)
+        let url = format!(
+            "{}/quote?inputMint={}&outputMint={}&amount=1000000000&slippageBps=50",
+            self.api_base, SOL_MINT, USDC_MINT
+        );
         self.client.get(&url).send().await
             .map(|r| r.status().is_success())
             .unwrap_or(false)

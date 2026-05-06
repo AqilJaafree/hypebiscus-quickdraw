@@ -11,7 +11,9 @@ use quickdraw_infra::worker_client::WorkerClient;
 
 #[derive(Debug, Deserialize)]
 struct RugCheckReport {
+    #[allow(dead_code)]
     mint: String,
+    #[allow(dead_code)]
     token_program: String,
     #[serde(default)]
     risks: Vec<RugRisk>,
@@ -35,14 +37,6 @@ struct HolderEntry {
 #[derive(Debug, Deserialize)]
 struct Market {
     liquidity: Option<f64>,
-}
-
-#[derive(Debug, Deserialize)]
-struct HeliusTokenInfo {
-    #[serde(rename = "mintAuthority")]
-    mint_authority: Option<String>,
-    #[serde(rename = "freezeAuthority")]
-    freeze_authority: Option<String>,
 }
 
 pub struct SafetyAggregator {
@@ -115,6 +109,7 @@ impl SafetyAggregator {
         Ok(SafetyReport {
             score,
             ticker: None,
+            decimals: 6,
             mint_authority_disabled: mint_disabled,
             freeze_authority_disabled: freeze_disabled,
             jupiter_listed,

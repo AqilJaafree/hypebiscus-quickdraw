@@ -70,6 +70,7 @@ pub struct DetectionEvent {
 pub struct SafetyReport {
     pub score: u8,
     pub ticker: Option<String>,
+    pub decimals: u8,
     pub mint_authority_disabled: bool,
     pub freeze_authority_disabled: bool,
     pub jupiter_listed: bool,
@@ -90,12 +91,16 @@ pub struct TokenPrice {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AdapterQuote {
     pub adapter_name: String,
+    pub token_in: Pubkey,
+    pub token_out: Pubkey,
     pub in_amount: u64,
     pub out_amount: u64,
     pub price_impact_pct: f64,
     pub slippage_bps: u16,
     pub fee_usd: f64,
     pub route_label: String,
+    // Raw serialised quote response — needed by build_transaction to call /swap
+    pub raw_response: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
