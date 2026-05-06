@@ -114,6 +114,7 @@ tracing-subscriber  = { workspace = true }
 dotenvy             = { workspace = true }
 open                = { workspace = true }
 anyhow              = { workspace = true }
+uuid                = { workspace = true }
 
 [profile.dev]
 opt-level = 1

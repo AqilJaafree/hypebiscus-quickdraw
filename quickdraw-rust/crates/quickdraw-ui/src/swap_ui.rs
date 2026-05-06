@@ -2,6 +2,7 @@ use egui::{Color32, Margin, RichText, Stroke, Ui};
 use tokio::sync::mpsc;
 
 use quickdraw_core::{commands::Command, state::AppSnapshot};
+use solana_sdk::pubkey::Pubkey;
 use crate::design::Colors;
 
 // Wrapped SOL mint — token_in for all BUY swaps
@@ -45,6 +46,7 @@ pub struct SwapUiState {
     pub last_input_time:  f64,  // egui time of most recent keystroke
     pub pending_fetch:    bool, // debounce: fetch queued but not yet sent
     pub confirming_since: f64,  // egui time when Confirming started (0 = not set)
+    pub token_address:    Option<Pubkey>, // which token this state belongs to
 }
 
 pub fn show_swap_panel(
@@ -54,6 +56,13 @@ pub fn show_swap_panel(
 ) {
     let state_id = egui::Id::new("swap_ui_state");
     let mut state: SwapUiState = ui.ctx().data_mut(|d| d.get_temp(state_id).unwrap_or_default());
+
+    // Reset all swap UI state when the token changes — prevents Confirming/Success
+    // status from a previous token bleeding into the new overlay.
+    if state.token_address != snap.token_address {
+        state = SwapUiState::default();
+        state.token_address = snap.token_address;
+    }
 
     let ticker = snap.token_ticker.as_deref()
         .or(snap.safety_report.as_ref().and_then(|r| r.ticker.as_deref()))
@@ -215,8 +224,9 @@ pub fn show_swap_panel(
                                 );
                                 if max_btn.clicked() {
                                     state.amount_str = "0.5".to_owned();
-                                    state.status = SwapUiStatus::Fetching;
-                                    dispatch_fetch_quotes(&state.amount_str, snap, cmd_tx);
+                                    if dispatch_fetch_quotes(&state.amount_str, snap, cmd_tx).is_ok() {
+                                        state.status = SwapUiStatus::Fetching;
+                                    }
                                 }
                             });
                     });
@@ -298,11 +308,15 @@ pub fn show_swap_panel(
                             if let Some(quote) = snap.quotes.first() {
                                 // SelectQuote moves FSM to AwaitingSwapConfirm; ConfirmSwap
                                 // then emits SideEffect::SignTransaction from that state.
-                                let _ = cmd_tx.try_send(Command::SelectQuote(quote.clone()));
-                                let _ = cmd_tx.try_send(Command::ConfirmSwap);
+                                let r1 = cmd_tx.try_send(Command::SelectQuote(quote.clone()));
+                                let r2 = cmd_tx.try_send(Command::ConfirmSwap);
+                                if r1.is_ok() && r2.is_ok() {
+                                    state.status = SwapUiStatus::Confirming;
+                                    state.confirming_since = ui.input(|i| i.time);
+                                } else {
+                                    state.status = SwapUiStatus::Error("Failed to submit swap — try again".into());
+                                }
                             }
-                            state.status = SwapUiStatus::Confirming;
-                            state.confirming_since = ui.input(|i| i.time);
                         }
                     }
 
@@ -370,8 +384,9 @@ pub fn show_swap_panel(
         if now - state.last_input_time >= 0.4 {
             state.pending_fetch = false;
             if has_valid_amount && state.amount_str != state.last_fetched {
-                state.status = SwapUiStatus::Fetching;
-                dispatch_fetch_quotes(&state.amount_str, snap, cmd_tx);
+                if dispatch_fetch_quotes(&state.amount_str, snap, cmd_tx).is_ok() {
+                    state.status = SwapUiStatus::Fetching;
+                }
             }
         } else {
             ui.ctx().request_repaint_after(std::time::Duration::from_millis(80));
@@ -382,21 +397,24 @@ pub fn show_swap_panel(
 }
 
 /// Parse the SOL amount string and send FetchQuotes to the engine.
+/// Returns Ok(()) only if the command was successfully enqueued.
 fn dispatch_fetch_quotes(
     amount_str: &str,
     snap: &AppSnapshot,
     cmd_tx: &mpsc::Sender<Command>,
-) {
-    let Some(token_out) = snap.token_address else { return };
-    let Ok(sol) = amount_str.parse::<f64>() else { return };
-    if sol <= 0.0 { return; }
+) -> Result<(), String> {
+    let Some(token_out) = snap.token_address else { return Err("no token address".into()) };
+    let Ok(sol) = amount_str.parse::<f64>() else { return Err("invalid amount".into()) };
+    if sol <= 0.0 { return Err("zero amount".into()); }
 
-    let Ok(token_in) = SOL_MINT.parse::<solana_sdk::pubkey::Pubkey>() else { return };
+    let Ok(token_in) = SOL_MINT.parse::<solana_sdk::pubkey::Pubkey>() else {
+        return Err("invalid SOL mint".into())
+    };
     let lamports = (sol * 1_000_000_000.0) as u64;
 
-    let _ = cmd_tx.try_send(Command::FetchQuotes {
+    cmd_tx.try_send(Command::FetchQuotes {
         token_in,
         token_out,
         amount: lamports,
-    });
+    }).map_err(|e| e.to_string())
 }

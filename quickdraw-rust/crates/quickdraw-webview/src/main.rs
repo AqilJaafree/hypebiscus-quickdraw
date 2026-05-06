@@ -12,14 +12,18 @@
 //!
 //! Usage: quickdraw-webview <url>
 
+#[cfg(target_os = "linux")]
 use glib::Cast;
+#[cfg(target_os = "linux")]
 use gtk::prelude::*;
+#[cfg(target_os = "linux")]
 use webkit2gtk::{
     NavigationPolicyDecision, NavigationPolicyDecisionExt,
     PolicyDecisionExt, PolicyDecisionType,
     URIRequestExt, WebView, WebViewExt,
 };
 
+#[cfg(target_os = "linux")]
 fn main() {
     let url = match std::env::args().nth(1) {
         Some(u) if !u.is_empty() => u,
@@ -136,7 +140,14 @@ fn main() {
     eprintln!("[webview] GTK main loop exited");
 }
 
+#[cfg(not(target_os = "linux"))]
+fn main() {
+    eprintln!("quickdraw-webview requires Linux (GTK + WebKit2GTK)");
+    std::process::exit(1);
+}
+
 /// Forward the intercepted callback URL to the Rust server via raw TCP.
+#[cfg(target_os = "linux")]
 fn relay_callback(url: &str) {
     use std::io::{Read, Write};
     use std::net::TcpStream;

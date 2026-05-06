@@ -74,18 +74,16 @@ fn main() -> Result<()> {
     let enricher = Arc::new(DetectionEnricher::new(detection_tx));
 
     if !demo_mode {
-        // Wait for eframe before starting OS-level watchers
-        let startup_delay = std::time::Duration::from_secs(2);
+        // Wait for eframe to finish initializing before starting OS-level watchers.
+        // 500ms is enough for egui/winit to open and process its first frame.
+        let startup_delay = std::time::Duration::from_millis(500);
 
-        // Clipboard watcher — fires on Ctrl+C / copy
+        // Clipboard watcher — fires on Ctrl+C / copy (150ms poll)
         let enricher_clip = enricher.clone();
         rt.spawn(async move {
             tokio::time::sleep(startup_delay).await;
             let mut rx = quickdraw_platform::linux::clipboard::spawn_clipboard_watcher();
-            while let Some(text) = rx.recv().await {
-                // Read cursor position at copy time so the popup appears near the user's cursor
-                let position = quickdraw_platform::linux::clipboard::cursor_position()
-                    .unwrap_or(Point { x: 100.0, y: 100.0 });
+            while let Some((text, position)) = rx.recv().await {
                 enricher_clip.process(RawDetection {
                     text,
                     position,
@@ -94,7 +92,7 @@ fn main() -> Result<()> {
             }
         });
 
-        // Selection watcher — fires when the user highlights text (no copy needed)
+        // Selection watcher — fires when the user highlights text (100ms poll)
         let enricher_sel = enricher.clone();
         rt.spawn(async move {
             tokio::time::sleep(startup_delay).await;
@@ -127,7 +125,7 @@ fn main() -> Result<()> {
     // ── Engine ───────────────────────────────────────────────────────────────
     let snap_engine   = snapshot.clone();
     let repaint_engine = repaint_tx.clone();
-    rt.spawn(engine_task(cmd_rx, snap_engine, repaint_engine, settings_mode));
+    rt.spawn(engine_task(cmd_rx, snap_engine, repaint_engine, settings_mode, cmd_tx.clone()));
 
     // ── eframe ───────────────────────────────────────────────────────────────
     let native_opts = eframe::NativeOptions {
@@ -173,15 +171,31 @@ async fn engine_task(
     snapshot: Arc<RwLock<AppSnapshot>>,
     repaint_tx: std::sync::mpsc::Sender<()>,
     settings_mode: bool,
+    cmd_tx: mpsc::Sender<Command>,
 ) {
     info!("ENGINE: started");
 
     let mut state = AppState::default();
     if settings_mode { state.settings_visible = true; }
     let http = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(5))
+        .timeout(std::time::Duration::from_secs(3))
         .build()
         .expect("http client");
+
+    // Pre-warm TLS connections to Jupiter and Dexscreener so the first real
+    // detection doesn't pay the DNS + TCP + TLS handshake cost (~400-700ms).
+    // Uses WSOL as a known-valid query; results are discarded.
+    {
+        let http_warm = http.clone();
+        tokio::spawn(async move {
+            let wsol = "So11111111111111111111111111111111111111112";
+            let _ = tokio::join!(
+                http_warm.get(format!("https://lite-api.jup.ag/tokens/v2/search?query={wsol}")).send(),
+                http_warm.get(format!("https://api.dexscreener.com/latest/dex/tokens/{wsol}")).send(),
+            );
+            info!("HTTP connection pool warmed");
+        });
+    }
 
     let worker_url  = std::env::var("WORKER_URL").unwrap_or_default();
     let app_secret  = std::env::var("APP_SECRET").unwrap_or_default();
@@ -196,7 +210,20 @@ async fn engine_task(
     };
     let haiku = Arc::new(haiku);
 
+    // Abort handles for the current token's async fetch tasks.
+    // Drained and aborted whenever a new token is detected or the overlay closes,
+    // so stale HTTP requests don't compete with the current token's fetches.
+    let mut token_handles: Vec<tokio::task::AbortHandle> = Vec::new();
+
     while let Some(cmd) = cmd_rx.recv().await {
+        // Cancel any in-flight fetches for the previous token before processing.
+        match &cmd {
+            Command::TokenDetected(_) | Command::DismissOverlay | Command::CancelSwap => {
+                for h in token_handles.drain(..) { h.abort(); }
+            }
+            _ => {}
+        }
+
         let cmd_name = match &cmd {
             Command::TokenDetected(e)    => format!("TokenDetected({})", e.address),
             Command::DismissOverlay      => "DismissOverlay".into(),
@@ -213,7 +240,8 @@ async fn engine_task(
             Command::DisconnectWallet    => "DisconnectWallet".into(),
             Command::WalletConnected(pk) => format!("WalletConnected({})", pk),
             Command::SwapSigned(sig)     => format!("SwapSigned({}..)", &sig[..8.min(sig.len())]),
-            Command::FetchYield          => "FetchYield".into(),
+            Command::FetchYield           => "FetchYield".into(),
+            Command::QuotesFetched { .. } => "QuotesFetched".into(),
             Command::Shutdown            => "Shutdown".into(),
         };
         info!("ENGINE: {cmd_name}");
@@ -225,9 +253,12 @@ async fn engine_task(
         *snapshot.write().unwrap() = state.snapshot();
         let _ = repaint_tx.send(());
 
-        // Fire side effects — fetch tasks write directly to snapshot
+        // Fire side effects. Token-bound tasks return an abort handle so they can
+        // be cancelled immediately when the next token is detected.
         for effect in effects {
-            dispatch_effect(effect, snapshot.clone(), repaint_tx.clone(), &http, haiku.clone());
+            if let Some(h) = dispatch_effect(effect, snapshot.clone(), repaint_tx.clone(), &http, haiku.clone(), cmd_tx.clone()) {
+                token_handles.push(h);
+            }
         }
     }
 
@@ -277,13 +308,14 @@ fn dispatch_effect(
     repaint_tx: std::sync::mpsc::Sender<()>,
     http: &reqwest::Client,
     haiku: Arc<Option<HaikuProvider>>,
-) {
+    cmd_tx: mpsc::Sender<Command>,
+) -> Option<tokio::task::AbortHandle> {
     match effect {
         SideEffect::FetchPrice { address } => {
             let http = http.clone();
             let snap = snapshot.clone();
             let rep  = repaint_tx.clone();
-            tokio::spawn(async move {
+            let h = tokio::spawn(async move {
                 let price = fetch_price(&http, address).await.unwrap_or_else(|e| {
                     warn!("price fetch failed: {e}");
                     TokenPrice { price_usd: 0.0, change_24h_pct: 0.0, volume_24h_usd: 0.0, market_cap_usd: None }
@@ -292,22 +324,25 @@ fn dispatch_effect(
                     s.token_price = Some(price);
                 });
             });
+            Some(h.abort_handle())
         }
 
         SideEffect::DispatchAiNarration { address } => {
             let snap   = snapshot.clone();
             let rep    = repaint_tx.clone();
             let haiku  = haiku.clone();
-            tokio::spawn(async move {
+            let h = tokio::spawn(async move {
                 let Some(ref provider) = *haiku else { return };
 
-                // Wait up to 600ms for price fetch to complete before building context
+                // Wait up to 600ms for price fetch to complete before building context.
+                // 50ms sleep keeps the check tight so narration starts as soon as
+                // price lands rather than overshooting by up to 100ms.
                 let mut waited = 0u64;
                 while waited < 600 {
                     let has_price = snap.read().unwrap().token_price.is_some();
                     if has_price { break; }
-                    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-                    waited += 100;
+                    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                    waited += 50;
                 }
 
                 // Bail if a newer token was detected while we waited
@@ -352,14 +387,16 @@ fn dispatch_effect(
                     Err(e) => warn!("AI narration failed: {e}"),
                 }
             });
+            Some(h.abort_handle())
         }
 
         SideEffect::FetchSafetyScore { address } => {
-            let http  = http.clone();
-            let snap  = snapshot.clone();
-            let rep   = repaint_tx.clone();
-            let haiku = haiku.clone();
-            tokio::spawn(async move {
+            let http   = http.clone();
+            let snap   = snapshot.clone();
+            let rep    = repaint_tx.clone();
+            let haiku  = haiku.clone();
+            let cmd_tx = cmd_tx.clone();
+            let h = tokio::spawn(async move {
                 let report = fetch_jupiter_safety(&http, address).await.unwrap_or_else(|e| {
                     warn!("safety fetch failed: {e}");
                     default_safety_report()
@@ -376,15 +413,18 @@ fn dispatch_effect(
 
                 if !updated { return; } // Token changed — discard
 
-                // Fire AI narration now — safety ready, price likely ready too
-                dispatch_effect(
+                // Fire AI narration now that safety is ready; its handle is tracked
+                // by the engine's token_handles via the return value below.
+                let _ = dispatch_effect(
                     SideEffect::DispatchAiNarration { address },
                     snap,
                     rep,
                     &http,
                     haiku,
+                    cmd_tx,
                 );
             });
+            Some(h.abort_handle())
         }
 
         SideEffect::OpenWalletConnect => {
@@ -394,57 +434,68 @@ fn dispatch_effect(
             } else {
                 warn!("WORKER_URL not set — cannot open Reown auth");
             }
+            None
         }
 
         SideEffect::FetchQuotes { token_in, token_out, amount } => {
-            let snap = snapshot.clone();
-            let rep  = repaint_tx.clone();
-            tokio::spawn(async move {
+            let tx = cmd_tx.clone();
+            let h = tokio::spawn(async move {
                 use quickdraw_defi::adapters::jupiter::JupiterAdapter;
                 use quickdraw_defi::adapter::DefiAdapter;
                 let adapter = JupiterAdapter::new();
                 match adapter.get_quote(token_in, token_out, amount).await {
                     Ok(quote) => {
-                        update_if_current(&snap, token_out, &rep, |s| {
-                            s.quotes = vec![quote];
-                            s.quote_error = None;
-                        });
+                        let _ = tx.send(Command::QuotesFetched {
+                            token_out,
+                            quote: Some(quote),
+                            error: None,
+                        }).await;
                     }
                     Err(e) => {
                         warn!("FetchQuotes failed: {e}");
-                        push_quote_error(&snap, &rep, format!("Quote failed: {e}"));
+                        let _ = tx.send(Command::QuotesFetched {
+                            token_out,
+                            quote: None,
+                            error: Some(format!("Quote failed: {e}")),
+                        }).await;
                     }
                 }
             });
+            Some(h.abort_handle())
         }
 
         SideEffect::SignTransaction { selected_quote } => {
             let snap = snapshot.clone();
-            let rep  = repaint_tx.clone();
-            tokio::spawn(async move {
+            let tx   = cmd_tx.clone();
+            let h = tokio::spawn(async move {
                 use quickdraw_defi::adapters::jupiter::JupiterAdapter;
                 use quickdraw_defi::adapter::DefiAdapter;
 
+                let token_out = selected_quote.token_out;
                 let wallet = snap.read().unwrap().wallet_pubkey;
                 let Some(wallet) = wallet else {
-                    push_quote_error(&snap, &rep, "No wallet connected".into());
+                    let _ = tx.send(Command::QuotesFetched {
+                        token_out,
+                        quote: None,
+                        error: Some("No wallet connected".into()),
+                    }).await;
                     return;
                 };
 
-                // Build the unsigned transaction via Jupiter /swap
                 let adapter = JupiterAdapter::new();
                 let raw_tx = match adapter.build_transaction(&selected_quote, wallet).await {
                     Ok(b) => b,
                     Err(e) => {
                         warn!("build_transaction: {e}");
-                        push_quote_error(&snap, &rep, format!("Build tx failed: {e}"));
+                        let _ = tx.send(Command::QuotesFetched {
+                            token_out,
+                            quote: None,
+                            error: Some(format!("Build tx failed: {e}")),
+                        }).await;
                         return;
                     }
                 };
 
-                // Encode as base64 and open the browser to sign.
-                // The auth page calls signAndSendTransaction via Reown AppKit,
-                // then redirects to /sign-result?sig=<signature>.
                 let tx_b64 = base64::Engine::encode(
                     &base64::engine::general_purpose::STANDARD,
                     &raw_tx,
@@ -456,21 +507,21 @@ fn dispatch_effect(
                     "{auth_url}?sign={tx_b64}&callback={callback}"
                 );
 
-                // Signing always goes to the system browser — Phantom, Solflare, and other
-                // browser extensions inject into the system browser but not into a custom
-                // GTK webview. The callback server on port 9427 receives the signature
-                // regardless of which context the page runs in.
                 info!("Opening system browser for wallet signing");
                 if let Err(e) = open::that(&sign_url) {
-                    push_quote_error(&snap, &rep, format!("Could not open browser: {e}"));
+                    let _ = tx.send(Command::QuotesFetched {
+                        token_out,
+                        quote: None,
+                        error: Some(format!("Could not open browser: {e}")),
+                    }).await;
                 }
-                // Signature arrives via Command::SwapSigned from auth_callback_server
             });
+            Some(h.abort_handle())
         }
 
         SideEffect::ShowOverlay { .. } | SideEffect::DismissOverlay => {
-            // Already handled by FSM state — snapshot was published above
             let _ = repaint_tx.send(());
+            None
         }
 
         SideEffect::Shutdown => {
@@ -478,7 +529,7 @@ fn dispatch_effect(
             std::process::exit(0);
         }
 
-        _ => {}
+        _ => None,
     }
 }
 
@@ -800,16 +851,29 @@ async fn auth_callback_server(cmd_tx: mpsc::Sender<Command>) {
 // Helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Write an error into the snapshot's quote_error field and trigger a repaint.
-fn push_quote_error(
-    snapshot: &Arc<RwLock<AppSnapshot>>,
-    repaint: &std::sync::mpsc::Sender<()>,
-    msg: String,
-) {
-    let mut s = snapshot.write().unwrap();
-    s.quote_error = Some(msg);
-    s.version += 1;
-    let _ = repaint.send(());
+// ── Per-flow nonces ──────────────────────────────────────────────────────────
+// Each connect/sign flow embeds a UUID nonce in the callback base URL so the
+// callback server can verify the request originated from a flow we initiated.
+// Nonces are single-use and expire after 10 minutes.
+
+static NONCE_STORE: OnceLock<std::sync::Mutex<std::collections::HashMap<String, std::time::Instant>>>
+    = OnceLock::new();
+
+fn nonce_store() -> &'static std::sync::Mutex<std::collections::HashMap<String, std::time::Instant>> {
+    NONCE_STORE.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()))
+}
+
+fn register_nonce() -> String {
+    let nonce = uuid::Uuid::new_v4().to_string();
+    nonce_store().lock().unwrap().insert(nonce.clone(), std::time::Instant::now());
+    nonce
+}
+
+/// Validates and removes a nonce. Returns false if absent or older than 10 minutes.
+fn consume_nonce(nonce: &str) -> bool {
+    let mut store = nonce_store().lock().unwrap();
+    store.retain(|_, issued| issued.elapsed().as_secs() < 600);
+    store.remove(nonce).is_some()
 }
 
 /// Called by the engine when Command::ConnectWallet is received.

@@ -19,6 +19,7 @@ pub enum Command {
     DisconnectWallet,
     WalletConnected(Pubkey),
     SwapSigned(String),
+    QuotesFetched { token_out: Pubkey, quote: Option<AdapterQuote>, error: Option<String> },
     FetchYield,
     Shutdown,
 }

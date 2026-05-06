@@ -26,7 +26,10 @@ fn dismiss_overlay(state: &mut AppState) {
     state.safety_report = None;
     state.token_price = None;
     state.quotes = Vec::new();
+    state.quote_error = None;
+    state.swap_signature = None;
     state.ai_narration = None;
+    state.ai_streaming = false;
     state.version += 1;
 }
 
@@ -128,8 +131,22 @@ pub fn process(state: &mut AppState, cmd: Command) -> Vec<SideEffect> {
         }
 
         Command::SwapSigned(sig) => {
-            state.swap_signature = Some(sig);
-            state.version += 1;
+            // Only accept the signature when we're actually waiting for one.
+            // A stale browser tab completing after cancel would otherwise
+            // overwrite state and make the UI show Success for the wrong token.
+            if matches!(state.fsm, QuickdrawState::AwaitingWalletSign) {
+                state.swap_signature = Some(sig);
+                state.version += 1;
+            }
+            vec![]
+        }
+
+        Command::QuotesFetched { token_out, quote, error } => {
+            if state.token_address == Some(token_out) {
+                state.quotes = quote.map(|q| vec![q]).unwrap_or_default();
+                state.quote_error = error;
+                state.version += 1;
+            }
             vec![]
         }
 
