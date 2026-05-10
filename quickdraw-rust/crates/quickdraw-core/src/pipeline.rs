@@ -218,7 +218,7 @@ pub fn process(state: &mut AppState, cmd: Command) -> Vec<SideEffect> {
         }
 
         Command::VoiceTranscript(transcript) => {
-            let text  = transcript.to_ascii_lowercase();
+            let text  = transcript.trim().to_ascii_lowercase();
             let words: Vec<&str> = text.split_whitespace().collect();
 
             // While a guide is active, intercept navigation words and skip intent parsing.
@@ -236,8 +236,11 @@ pub fn process(state: &mut AppState, cmd: Command) -> Vec<SideEffect> {
                     state.version += 1;
                     return vec![SideEffect::StopAudioCapture];
                 }
-                if is_back && state.guide_step_index > 0 {
-                    state.guide_step_index -= 1;
+                if is_back {
+                    if state.guide_step_index > 0 {
+                        state.guide_step_index -= 1;
+                    }
+                    state.fsm = QuickdrawState::Idle;
                     state.version += 1;
                     let mut fx = cursor_effect(state);
                     fx.push(SideEffect::StopAudioCapture);
@@ -246,6 +249,7 @@ pub fn process(state: &mut AppState, cmd: Command) -> Vec<SideEffect> {
                 if is_next {
                     if state.guide_step_index + 1 < state.guide_steps.len() {
                         state.guide_step_index += 1;
+                        state.fsm = QuickdrawState::Idle;
                         state.version += 1;
                         let mut fx = cursor_effect(state);
                         fx.push(SideEffect::StopAudioCapture);
@@ -266,21 +270,21 @@ pub fn process(state: &mut AppState, cmd: Command) -> Vec<SideEffect> {
                 state.guide_steps.clear();
                 state.guide_step_index = 0;
                 state.guide_fetching = false;
-                state.fsm = QuickdrawState::Thinking { transcript: transcript.clone() };
+                state.fsm = QuickdrawState::Thinking { transcript: text.clone() };
                 state.version += 1;
                 return vec![
                     SideEffect::StopAudioCapture,
-                    SideEffect::ParseVoiceIntent { transcript },
+                    SideEffect::ParseVoiceIntent { transcript: text },
                 ];
             }
 
-            state.fsm = QuickdrawState::Thinking { transcript: transcript.clone() };
+            state.fsm = QuickdrawState::Thinking { transcript: text.clone() };
             state.version += 1;
             // Stop the session automatically so the user doesn't have to press the button again.
             // For each command (analyze, buy, etc.) they start fresh with a single press.
             vec![
                 SideEffect::StopAudioCapture,
-                SideEffect::ParseVoiceIntent { transcript },
+                SideEffect::ParseVoiceIntent { transcript: text },
             ]
         }
 
@@ -295,6 +299,9 @@ pub fn process(state: &mut AppState, cmd: Command) -> Vec<SideEffect> {
         }
 
         Command::GuideFetched(steps) => {
+            if !state.guide_fetching {
+                return vec![]; // dismissed while fetch was in flight — discard
+            }
             if steps.is_empty() {
                 state.guide_fetching = false;
                 state.fsm = QuickdrawState::Idle;

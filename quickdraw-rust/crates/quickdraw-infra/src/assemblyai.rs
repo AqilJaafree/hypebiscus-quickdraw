@@ -55,7 +55,7 @@ impl AssemblyAiSession {
         let (transcript_tx, transcript_rx) = mpsc::channel::<TranscriptEvent>(64);
 
         let url = format!(
-            "wss://streaming.assemblyai.com/v3/ws?sample_rate_hertz=16000&speech_model=universal-streaming-english&token={}",
+            "wss://streaming.assemblyai.com/v3/ws?sample_rate=16000&speech_model=universal-streaming-english&token={}",
             token
         );
 

@@ -6,6 +6,22 @@ use solana_sdk::pubkey::Pubkey;
 use std::time::Duration;
 use tracing::debug;
 
+/// Returns the local bind address for outgoing HTTP connections.
+///
+/// Defaults to `0.0.0.0` (force IPv4) because several Jupiter/Cloudflare
+/// endpoints time out over IPv6 on common Linux network configurations.
+/// Override by setting `QUICKDRAW_BIND_ADDR` in the environment:
+///   - `""` or unset-equivalent → no binding (OS default, enables IPv6)
+///   - `"0.0.0.0"` → force IPv4 (the default)
+///   - `"::"` → force IPv6
+fn local_bind_addr() -> Option<std::net::IpAddr> {
+    match std::env::var("QUICKDRAW_BIND_ADDR").as_deref() {
+        Ok("") => None,
+        Ok(addr) => addr.parse().ok(),
+        Err(_) => "0.0.0.0".parse().ok(),
+    }
+}
+
 use quickdraw_core::types::AdapterQuote;
 use crate::adapter::DefiAdapter;
 
@@ -70,7 +86,7 @@ impl JupiterAdapter {
         Self {
             client: Client::builder()
                 .timeout(Duration::from_secs(8))
-                .local_address("0.0.0.0".parse::<std::net::IpAddr>().ok())
+                .local_address(local_bind_addr())
                 .build()
                 .expect("reqwest client"),
             api_base: JUPITER_API.to_string(),
@@ -81,7 +97,7 @@ impl JupiterAdapter {
         Self {
             client: Client::builder()
                 .timeout(Duration::from_secs(8))
-                .local_address("0.0.0.0".parse::<std::net::IpAddr>().ok())
+                .local_address(local_bind_addr())
                 .build()
                 .expect("reqwest client"),
             api_base: base_url.into(),

@@ -98,15 +98,20 @@ async fn drain_sse(resp: reqwest::Response) -> Result<String> {
         text: Option<String>,
     }
 
-    let mut buf    = String::new();
-    let mut stream = resp.bytes_stream();
+    let mut buf          = String::new();
+    let mut partial_line = String::new();
+    let mut stream       = resp.bytes_stream();
 
-    while let Some(chunk) = stream.next().await {
-        let bytes = chunk?;
-        let text  = String::from_utf8_lossy(&bytes);
-        for line in text.lines() {
-            let Some(data) = line.strip_prefix("data: ") else { continue };
-            if data == "[DONE]" { break; }
+    'outer: while let Some(chunk) = stream.next().await {
+        partial_line.push_str(&String::from_utf8_lossy(&chunk?));
+
+        // Split on '\n'; the last element may be incomplete — hold it over.
+        let mut parts = partial_line.split('\n');
+        let leftover  = parts.next_back().unwrap_or("").to_string();
+
+        for line in parts {
+            let Some(data) = line.trim_end_matches('\r').strip_prefix("data: ") else { continue };
+            if data == "[DONE]" { break 'outer; }
             if let Ok(event) = serde_json::from_str::<SseEvent>(data) {
                 if event.kind == "content_block_delta" {
                     if let Some(d) = event.delta {
@@ -115,6 +120,8 @@ async fn drain_sse(resp: reqwest::Response) -> Result<String> {
                 }
             }
         }
+
+        partial_line = leftover;
     }
 
     Ok(buf)

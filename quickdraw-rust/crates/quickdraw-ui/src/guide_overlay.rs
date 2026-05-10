@@ -137,10 +137,12 @@ pub fn show_guide_cursor(
         return;
     };
 
-    let screen = ctx.screen_rect();
-    let scale  = screen.width() / 1280.0;
-    let init   = Pos2::new((tx * scale - DOT / 2.0).clamp(screen.left(), screen.right() - DOT),
-                           (ty * scale - DOT / 2.0).clamp(screen.top(),  screen.bottom() - DOT));
+    let parent_screen = ctx.screen_rect();
+    let parent_scale  = parent_screen.width() / 1280.0;
+    let init = Pos2::new(
+        (tx * parent_scale - DOT / 2.0).clamp(parent_screen.left(), parent_screen.right() - DOT),
+        (ty * parent_scale - DOT / 2.0).clamp(parent_screen.top(),  parent_screen.bottom() - DOT),
+    );
 
     let builder = egui::ViewportBuilder::default()
         .with_title("Quickdraw Cursor Dot")
@@ -173,11 +175,9 @@ pub fn show_guide_cursor(
                 if snap.guide_step_index != a.last_step || snap.version != a.last_version {
                     a.last_step    = snap.guide_step_index;
                     a.last_version = snap.version;
-                    let screen = ctx.screen_rect();
-                    let scale  = screen.width() / 1280.0;
                     let new_pos = Pos2::new(
-                        (tx2 * scale - DOT / 2.0).clamp(screen.left(), screen.right() - DOT),
-                        (ty2 * scale - DOT / 2.0).clamp(screen.top(),  screen.bottom() - DOT),
+                        (tx2 * parent_scale - DOT / 2.0).clamp(parent_screen.left(), parent_screen.right() - DOT),
+                        (ty2 * parent_scale - DOT / 2.0).clamp(parent_screen.top(),  parent_screen.bottom() - DOT),
                     );
                     ctx.send_viewport_cmd(egui::ViewportCommand::OuterPosition(new_pos));
                 }

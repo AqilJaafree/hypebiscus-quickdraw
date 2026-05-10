@@ -66,9 +66,10 @@ fn strip_step_prefix(text: &str) -> &str {
         return t[i + 1..].trim();
     }
     // Strip "Step N: " or "Step N — "
-    if t.len() > 5 && t[..5].eq_ignore_ascii_case("step ") {
-        if let Some(sep) = t.find([':','-','—']) {
-            return t[sep + 1..].trim();
+    let prefix5: String = t.chars().take(5).collect();
+    if prefix5.eq_ignore_ascii_case("step ") {
+        if let Some((sep_idx, sep_char)) = t.char_indices().find(|(_, c)| matches!(c, ':' | '-' | '\u{2014}')) {
+            return t[sep_idx + sep_char.len_utf8()..].trim();
         }
     }
     t

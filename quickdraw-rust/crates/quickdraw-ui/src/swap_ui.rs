@@ -18,9 +18,9 @@ const BTN_DISABLED_BG:  Color32 = Color32::from_rgb(0x1A, 0x1A, 0x1A);
 
 // ── No-wallet state — muted but readable, matches Pencil design ──────────────
 const NW_INPUT_BG:      Color32 = Color32::from_rgb(0x18, 0x18, 0x18);
-const NW_BORDER:        Color32 = Color32::from_rgb(0x3a, 0x3a, 0x3a); // NW_BORDER / NW_BORDER / NW_BORDER
+const NW_BORDER:        Color32 = Color32::from_rgb(0x3a, 0x3a, 0x3a);
 const NW_TEXT:          Color32 = Color32::from_rgb(0x4a, 0x4a, 0x4a);
-const NW_CONTROL_BG:    Color32 = Color32::from_rgb(0x1a, 0x1a, 0x1a); // NW_CONTROL_BG / NW_CONTROL_BG
+const NW_CONTROL_BG:    Color32 = Color32::from_rgb(0x1a, 0x1a, 0x1a);
 const NW_QUOTE_BG:      Color32 = Color32::from_rgb(0x12, 0x12, 0x12);
 const NW_HINT:          Color32 = Color32::from_rgb(0x55, 0x55, 0x55);
 
