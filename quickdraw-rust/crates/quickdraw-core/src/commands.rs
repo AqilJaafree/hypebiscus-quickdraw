@@ -1,6 +1,7 @@
 use solana_sdk::pubkey::Pubkey;
 use crate::types::{AdapterQuote, DetectionEvent};
 use crate::state::AiMode;
+use crate::guide::GuideStep;
 
 #[derive(Debug, Clone)]
 pub enum Command {
@@ -21,5 +22,11 @@ pub enum Command {
     SwapSigned(String),
     QuotesFetched { token_out: Pubkey, quote: Option<AdapterQuote>, error: Option<String> },
     FetchYield,
+    VoiceTranscript(String),
+    StartGuide(String),
+    GuideFetched(Vec<GuideStep>),
+    GuideNext,
+    GuideBack,
+    GuideDismiss,
     Shutdown,
 }

@@ -1,5 +1,6 @@
 pub mod state;
 pub mod commands;
+pub mod guide;
 pub mod events;
 pub mod types;
 pub mod error;

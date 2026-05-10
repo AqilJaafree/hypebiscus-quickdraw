@@ -5,9 +5,6 @@ use reqwest::Client;
 use rodio::{Decoder, OutputStream, Sink};
 use std::io::Cursor;
 use std::time::Duration;
-use tracing::info;
-
-use crate::worker_client::WorkerClient;
 
 const ELEVENLABS_VOICE_ID: &str = "21m00Tcm4TlvDq8ikWAM"; // Rachel — calm, clear
 const ELEVENLABS_BASE: &str = "https://api.elevenlabs.io/v1";
@@ -22,6 +19,7 @@ impl Tts {
         Self {
             client: Client::builder()
                 .timeout(Duration::from_secs(30))
+                .local_address("0.0.0.0".parse::<std::net::IpAddr>().ok())
                 .build()
                 .expect("reqwest"),
             api_key: api_key.into(),

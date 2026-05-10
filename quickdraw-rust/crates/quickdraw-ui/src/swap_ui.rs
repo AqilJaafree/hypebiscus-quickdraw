@@ -18,13 +18,10 @@ const BTN_DISABLED_BG:  Color32 = Color32::from_rgb(0x1A, 0x1A, 0x1A);
 
 // ── No-wallet state — muted but readable, matches Pencil design ──────────────
 const NW_INPUT_BG:      Color32 = Color32::from_rgb(0x18, 0x18, 0x18);
-const NW_INPUT_BORDER:  Color32 = Color32::from_rgb(0x3a, 0x3a, 0x3a);
+const NW_BORDER:        Color32 = Color32::from_rgb(0x3a, 0x3a, 0x3a); // NW_BORDER / NW_BORDER / NW_BORDER
 const NW_TEXT:          Color32 = Color32::from_rgb(0x4a, 0x4a, 0x4a);
-const NW_MAX_BG:        Color32 = Color32::from_rgb(0x1a, 0x1a, 0x1a);
+const NW_CONTROL_BG:    Color32 = Color32::from_rgb(0x1a, 0x1a, 0x1a); // NW_CONTROL_BG / NW_CONTROL_BG
 const NW_QUOTE_BG:      Color32 = Color32::from_rgb(0x12, 0x12, 0x12);
-const NW_QUOTE_BORDER:  Color32 = Color32::from_rgb(0x3a, 0x3a, 0x3a);
-const NW_BTN_BG:        Color32 = Color32::from_rgb(0x1a, 0x1a, 0x1a);
-const NW_BTN_BORDER:    Color32 = Color32::from_rgb(0x3a, 0x3a, 0x3a);
 const NW_HINT:          Color32 = Color32::from_rgb(0x55, 0x55, 0x55);
 
 #[derive(Clone, PartialEq, Default)]
@@ -75,7 +72,7 @@ pub fn show_swap_panel(
 
     // Derive button state
     let (btn_label, btn_active, btn_bg, btn_text, btn_border) = if !has_wallet {
-        ("LOGIN", false, NW_BTN_BG, Color32::from_rgb(0x66, 0x66, 0x66), NW_BTN_BORDER)
+        ("LOGIN", false, NW_CONTROL_BG, Color32::from_rgb(0x66, 0x66, 0x66), NW_BORDER)
     } else if !has_amount {
         ("ENTER AMOUNT", false, BTN_DISABLED_BG, TEXT_DIM, Color32::from_rgb(0x33, 0x33, 0x33))
     } else if state.status == SwapUiStatus::Fetching {
@@ -157,7 +154,7 @@ pub fn show_swap_panel(
                     // ── Input row ────────────────────────────────────────────
                     ui.horizontal(|ui| {
                         let (input_fill, input_border) = if !has_wallet {
-                            (NW_INPUT_BG, NW_INPUT_BORDER)
+                            (NW_INPUT_BG, NW_BORDER)
                         } else if has_quotes && state.status == SwapUiStatus::Ready {
                             (INPUT_BG, Colors::ACCENT_YELLOW)
                         } else {
@@ -203,7 +200,7 @@ pub fn show_swap_panel(
 
                         // MAX button
                         let (max_fill, max_border, max_text) = if !has_wallet {
-                            (NW_MAX_BG, NW_INPUT_BORDER, NW_TEXT)
+                            (NW_CONTROL_BG, NW_BORDER, NW_TEXT)
                         } else {
                             (INPUT_BG, BORDER_DIM, Color32::WHITE)
                         };
@@ -265,11 +262,11 @@ pub fn show_swap_panel(
                     } else {
                         // Fixed-height placeholder (28px) — dashed outline
                         let (ph_fill, ph_dash) = if !has_wallet {
-                            (NW_QUOTE_BG, NW_QUOTE_BORDER)
+                            (NW_QUOTE_BG, NW_BORDER)
                         } else {
                             (Color32::from_rgb(0x11, 0x11, 0x11), Color32::from_rgb(0x44, 0x44, 0x44))
                         };
-                        let ph_text = if !has_wallet { NW_QUOTE_BORDER } else { Color32::from_rgb(0x44, 0x44, 0x44) };
+                        let ph_text = if !has_wallet { NW_BORDER } else { Color32::from_rgb(0x44, 0x44, 0x44) };
 
                         let w = ui.available_width();
                         let (rect, _) = ui.allocate_exact_size(egui::vec2(w, 28.0), egui::Sense::hover());

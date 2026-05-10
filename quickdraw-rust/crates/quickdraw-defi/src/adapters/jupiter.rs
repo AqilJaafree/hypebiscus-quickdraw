@@ -70,6 +70,7 @@ impl JupiterAdapter {
         Self {
             client: Client::builder()
                 .timeout(Duration::from_secs(8))
+                .local_address("0.0.0.0".parse::<std::net::IpAddr>().ok())
                 .build()
                 .expect("reqwest client"),
             api_base: JUPITER_API.to_string(),
@@ -80,6 +81,7 @@ impl JupiterAdapter {
         Self {
             client: Client::builder()
                 .timeout(Duration::from_secs(8))
+                .local_address("0.0.0.0".parse::<std::net::IpAddr>().ok())
                 .build()
                 .expect("reqwest client"),
             api_base: base_url.into(),

@@ -5,33 +5,13 @@ use egui_plot::{Line, Plot, PlotPoints};
 /// `data` is a slice of `(unix_timestamp_secs, close_price_usd)`.
 pub fn show_price_chart(ui: &mut Ui, data: &[(f64, f64)]) {
     if data.is_empty() {
-        // Demo placeholder with a sine-wave shape
-        let demo: PlotPoints = (0..60)
-            .map(|i| {
-                let x = i as f64;
-                let y = 100.0 + 8.0 * (x * 0.3).sin() + 3.0 * (x * 0.7).cos();
-                [x, y]
-            })
-            .collect();
-
-        Plot::new("price_chart_demo")
-            .height(100.0)
-            .show_axes([false, true])
-            .allow_zoom(false)
-            .allow_drag(false)
-            .show(ui, |plot_ui| {
-                plot_ui.line(
-                    Line::new(demo)
-                        .color(Color32::from_rgb(0x42, 0xE8, 0xF5))
-                        .width(1.5),
-                );
-            });
-
+        ui.add_space(4.0);
         ui.label(
             egui::RichText::new("Chart data loading…")
                 .size(10.0)
                 .color(Color32::from_rgb(0x55, 0x55, 0x55)),
         );
+        ui.add_space(4.0);
         return;
     }
 

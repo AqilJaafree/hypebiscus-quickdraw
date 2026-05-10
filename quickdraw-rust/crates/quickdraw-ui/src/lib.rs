@@ -1,5 +1,6 @@
 pub mod app;
 pub mod design;
+pub mod guide_overlay;
 pub mod header;
 pub mod overlay;
 pub mod panel;

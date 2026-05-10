@@ -50,6 +50,7 @@ impl SafetyAggregator {
             worker,
             http: Client::builder()
                 .timeout(Duration::from_secs(8))
+                .local_address("0.0.0.0".parse::<std::net::IpAddr>().ok())
                 .build()
                 .expect("reqwest client"),
         }

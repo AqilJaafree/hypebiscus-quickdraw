@@ -64,7 +64,14 @@ fn spawn_watcher(tx: tokio::sync::mpsc::Sender<(String, Point)>, primary: bool, 
             }
             last = Some(text.clone());
             debug!("{label} changed: {} chars", text.len());
-            // Read cursor on this blocking thread — never blocks a tokio worker.
+            // Skip xdotool entirely for text that can't possibly be a Solana address
+            // (minimum base58 length is 32 chars, typical is 44). This avoids dozens
+            // of subprocess spawns during mouse-drag when only partial text is selected.
+            if text.len() < 32 {
+                continue;
+            }
+            // Read cursor here — only on the blocking watcher thread, and only when
+            // text is long enough to be worth validating.
             let pos = cursor_position().unwrap_or(Point { x: 100.0, y: 100.0 });
             if tx.blocking_send((text, pos)).is_err() {
                 break;

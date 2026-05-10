@@ -1,11 +1,10 @@
 use std::sync::Arc;
-use anyhow::Result;
 use futures::future::join_all;
 use solana_sdk::pubkey::Pubkey;
 use tracing::warn;
 
 use quickdraw_core::types::AdapterQuote;
-use crate::adapter::{AdapterRegistry, CircuitBreaker, DefiAdapter};
+use crate::adapter::{AdapterRegistry, CircuitBreaker};
 
 pub struct SmartSwapRouter {
     registry: AdapterRegistry,

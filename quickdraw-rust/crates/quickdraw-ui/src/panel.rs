@@ -2,7 +2,7 @@ use std::time::Instant;
 use egui::{Margin, RichText};
 use tokio::sync::mpsc;
 
-use quickdraw_core::{commands::Command, state::{AiMode, AppSnapshot}};
+use quickdraw_core::{commands::Command, state::{AiMode, AppSnapshot, QuickdrawState}};
 use crate::design::{Colors, Tokens};
 use crate::wallet_ui::WalletUiState;
 
@@ -171,6 +171,38 @@ fn draw_state_tab(
     slabel(ui, "STATS");
     srow(ui, "Last seen", snap.last_seen_ticker.as_deref().unwrap_or("—"));
     srow(ui, "Session",   &session_label(ui));
+    ui.add_space(10.0);
+
+    slabel(ui, "VOICE");
+    let is_listening = matches!(snap.fsm, QuickdrawState::Listening { .. });
+    let is_thinking  = matches!(snap.fsm, QuickdrawState::Thinking { .. });
+    ui.horizontal(|ui| {
+        let (mic_label, mic_fill, mic_text, mic_border) = if is_listening {
+            ("■ STOP", egui::Color32::from_rgb(0xF5, 0x42, 0x42), egui::Color32::WHITE, egui::Color32::from_rgb(0xF5, 0x42, 0x42))
+        } else {
+            ("🎤 LISTEN", egui::Color32::from_rgb(0x22, 0x22, 0x22), egui::Color32::from_rgb(0xAA, 0xAA, 0xAA), egui::Color32::from_rgb(0x44, 0x44, 0x44))
+        };
+        if ui.add(
+            egui::Button::new(egui::RichText::new(mic_label).size(10.0).strong().monospace().color(mic_text))
+                .fill(mic_fill)
+                .stroke(egui::Stroke::new(1.5, mic_border))
+                .rounding(egui::Rounding::ZERO)
+                .min_size(egui::vec2(90.0, 26.0))
+        ).clicked() {
+            let cmd = if is_listening { Command::StopListening } else { Command::StartListening };
+            let _ = cmd_tx.try_send(cmd);
+        }
+        if is_thinking {
+            if let QuickdrawState::Thinking { ref transcript } = snap.fsm {
+                let preview: String = transcript.chars().take(24).collect();
+                ui.label(egui::RichText::new(format!("◉ \"{preview}…\"")).size(9.0).monospace()
+                    .color(Colors::ACCENT_YELLOW));
+            }
+        } else if is_listening {
+            ui.label(egui::RichText::new("● REC").size(9.0).monospace()
+                .color(egui::Color32::from_rgb(0xF5, 0x42, 0x42)));
+        }
+    });
     ui.add_space(10.0);
 
     slabel(ui, "AI MODE");
