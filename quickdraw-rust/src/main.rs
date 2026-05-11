@@ -768,7 +768,7 @@ async fn parse_and_dispatch_intent(
     // that was silently detected during the listening session.
     // Covers: American/British spellings, "what is this", "tell me about", etc.
     let is_analyze = words.iter().any(|w| matches!(*w,
-        "analyze" | "analyse" | "analysis"
+        "analyze" | "analyse" | "analysis" | "analyst"
         | "check" | "inspect" | "research" | "scan" | "lookup" | "investigate"
         | "show" | "info" | "information" | "details"
         | "what" | "tell" | "look" | "explain" | "describe"
