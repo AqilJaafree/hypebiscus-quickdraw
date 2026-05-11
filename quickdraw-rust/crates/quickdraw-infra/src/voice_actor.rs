@@ -43,7 +43,6 @@ impl VoiceActor {
                 if let Some((_, stop_tx)) = self.active.take() {
                     let _ = stop_tx.send(());
                     info!("Voice capture stopped");
-                    let _ = self.cmd_tx.send(Command::StopListening).await;
                 }
             }
         }
@@ -59,22 +58,13 @@ impl VoiceActor {
         let (stop_tx, mut stop_rx) = oneshot::channel::<()>();
 
         tokio::spawn(async move {
-            let mut partial = String::new();
-
             loop {
                 tokio::select! {
                     _ = &mut stop_rx => break,
                     Some(event) = transcript_rx.recv() => {
-                        if event.is_final {
-                            let transcript = std::mem::take(&mut partial);
-                            if !transcript.is_empty() {
-                                // The AI layer parses the transcript into a swap intent
-                                // Command::VoiceTranscript would go here — Phase 7 extension
-                                tracing::info!(transcript = %transcript, "final transcript");
-                            }
-                        } else {
-                            partial = event.text;
-                            // Update UI with partial transcript
+                        if event.is_final && !event.text.is_empty() {
+                            tracing::info!(transcript = %event.text, "final transcript");
+                            let _ = cmd_tx.send(Command::VoiceTranscript(event.text)).await;
                         }
                     }
                 }

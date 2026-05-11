@@ -161,13 +161,19 @@ async function handleMarketPulse(env: Env): Promise<Response> {
 }
 
 async function handleTranscribeToken(env: Env): Promise<Response> {
-  const resp = await fetch("https://api.assemblyai.com/v2/realtime/token?expires_in=300", {
-    method: "POST",
+  const resp = await fetch("https://streaming.assemblyai.com/v3/token?expires_in_seconds=480", {
+    method: "GET",
     headers: {
       "Authorization": env.ASSEMBLYAI_API_KEY,
-      "Content-Type": "application/json",
     },
   });
+  if (!resp.ok) {
+    const body = await resp.text();
+    return new Response(JSON.stringify({ error: `AssemblyAI error ${resp.status}: ${body}` }), {
+      status: 502,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
   const data = await resp.json<{ token: string }>();
   return json({ token: data.token });
 }

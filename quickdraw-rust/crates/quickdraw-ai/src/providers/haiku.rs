@@ -1,14 +1,11 @@
 use anyhow::{bail, Result};
 use async_trait::async_trait;
-use futures::{Stream, StreamExt};
+use futures::StreamExt;
 use hmac::{Hmac, Mac};
-use pin_project_lite::pin_project;
 use reqwest::{Client, RequestBuilder};
 use sha2::Sha256;
 use serde::{Deserialize, Serialize};
-use std::pin::Pin;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
-use tracing::{debug, warn};
 
 use crate::provider::{AIProvider, AIRequest, AIResponse, TokenStream};
 
@@ -86,6 +83,7 @@ impl HaikuProvider {
         Self {
             client: Client::builder()
                 .timeout(Duration::from_secs(30))
+                .local_address("0.0.0.0".parse::<std::net::IpAddr>().ok())
                 .build()
                 .expect("reqwest client"),
             worker_url: worker_url.into(),

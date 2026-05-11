@@ -1,4 +1,5 @@
 pub mod worker_client;
+pub mod guide_fetcher;
 pub mod rpc;
 pub mod tx;
 pub mod audio;

@@ -6,17 +6,21 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use anyhow::Result;
-use tokio::sync::mpsc;
 use tokio::time;
-use tracing::{debug, info, warn};
+use tracing::{debug, info};
 
+use crate::enricher::DetectionEnricher;
+
+#[cfg(feature = "ocr")]
 use quickdraw_core::types::{DetectionSource, Point};
-use crate::enricher::{DetectionEnricher, RawDetection};
+#[cfg(feature = "ocr")]
+use crate::enricher::RawDetection;
 
 const OCR_INTERVAL: Duration = Duration::from_secs(2);
 const ACCESSIBILITY_IDLE_BEFORE_OCR: Duration = Duration::from_secs(5);
 
 pub struct OcrWatcher {
+    #[cfg_attr(not(feature = "ocr"), allow(dead_code))]
     enricher: Arc<DetectionEnricher>,
     last_accessibility_event: Arc<tokio::sync::Mutex<Instant>>,
 }
@@ -54,20 +58,18 @@ impl OcrWatcher {
 
     async fn capture_and_scan(&self) -> Result<()> {
         // Spawn the CPU-heavy work off the async runtime
+        #[cfg(feature = "ocr")]
         let enricher = self.enricher.clone();
 
         tokio::task::spawn_blocking(move || -> Result<()> {
-            let monitors = xcap::Monitor::all()?;
-            let Some(monitor) = monitors.first() else { return Ok(()); };
-
-            let image = monitor.capture_image()?;
-
-            // Compress to JPEG at reduced resolution to speed up OCR
-            let width = image.width().min(1280);
-            let height = (image.height() as f32 * (width as f32 / image.width() as f32)) as u32;
-
             #[cfg(feature = "ocr")]
             {
+                let monitors = xcap::Monitor::all()?;
+                let Some(monitor) = monitors.first() else { return Ok(()); };
+                let image = monitor.capture_image()?;
+                let width = image.width().min(1280);
+                let height = (image.height() as f32 * (width as f32 / image.width() as f32)) as u32;
+
                 let resized = image::imageops::resize(
                     &image,
                     width,
@@ -80,7 +82,6 @@ impl OcrWatcher {
                 api.set_image_from_mem(&raw)?;
                 let text = api.get_utf8_text()?;
 
-                // Fire enricher on the async runtime — bridge via std channel
                 let rt = tokio::runtime::Handle::current();
                 rt.block_on(enricher.process(RawDetection {
                     text,
@@ -90,9 +91,7 @@ impl OcrWatcher {
             }
 
             #[cfg(not(feature = "ocr"))]
-            {
-                debug!("OCR feature disabled — skipping Tesseract");
-            }
+            debug!("OCR feature disabled — skipping Tesseract");
 
             Ok(())
         })

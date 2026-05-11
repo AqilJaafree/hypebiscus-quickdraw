@@ -1,0 +1,130 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-linux:
+    name: Build Linux binaries
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libgtk-3-dev \
+            libwebkit2gtk-4.1-dev \
+            libglib2.0-dev \
+            libsoup-3.0-dev \
+            libjavascriptcoregtk-4.1-dev \
+            libxdo-dev \
+            libasound2-dev \
+            pkg-config
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: quickdraw-rust
+
+      - name: Build release binaries
+        working-directory: quickdraw-rust
+        run: cargo build --release -p quickdraw -p quickdraw-webview
+
+      - name: Package binaries
+        run: |
+          mkdir -p dist
+          cp quickdraw-rust/target/release/quickdraw dist/
+          cp quickdraw-rust/target/release/quickdraw-webview dist/
+          chmod +x dist/quickdraw dist/quickdraw-webview
+          tar -czf quickdraw-linux-x86_64.tar.gz -C dist quickdraw quickdraw-webview
+
+      - name: Upload binary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: quickdraw-linux-x86_64
+          path: quickdraw-linux-x86_64.tar.gz
+
+  build-extension:
+    name: Build Chrome extension
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: extension/package-lock.json
+
+      - name: Install dependencies
+        working-directory: extension
+        run: npm ci
+
+      - name: Build extension
+        working-directory: extension
+        run: npm run build
+
+      - name: Package extension
+        run: |
+          cd extension
+          zip -r ../quickdraw-extension.zip . \
+            --exclude "node_modules/*" \
+            --exclude "src/*" \
+            --exclude "*.ts" \
+            --exclude "tsconfig.json" \
+            --exclude "package*.json"
+
+      - name: Upload extension artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: quickdraw-extension
+          path: quickdraw-extension.zip
+
+  release:
+    name: Create GitHub Release
+    needs: [build-linux, build-extension]
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Quickdraw ${{ github.ref_name }}
+          body: |
+            ## Quickdraw ${{ github.ref_name }}
+
+            Passive DeFi intelligence for Solana — copy any token address, get instant safety score, price, and AI analysis.
+
+            ### Install (Linux)
+
+            1. Download and extract `quickdraw-linux-x86_64.tar.gz`
+            2. Run `./quickdraw` (keep `quickdraw-webview` in the same folder)
+
+            ### Chrome Extension
+
+            1. Download `quickdraw-extension.zip` and extract it
+            2. Go to `chrome://extensions` → Enable Developer mode → Load unpacked → select the extracted folder
+            3. Copy your extension ID and update `com.quickdraw.host.json`
+
+            ### What's included
+            - `quickdraw` — main desktop overlay binary
+            - `quickdraw-webview` — wallet auth popup (must be in same directory)
+            - `quickdraw-extension.zip` — Chrome/Brave extension
+          files: |
+            quickdraw-linux-x86_64/quickdraw-linux-x86_64.tar.gz
+            quickdraw-extension/quickdraw-extension.zip
+          draft: false
+          prerelease: ${{ contains(github.ref_name, '-') }}

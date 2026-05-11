@@ -1,9 +1,4 @@
-use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tokio::sync::Mutex;
-use tracing::debug;
-
-use crate::provider::Message;
 
 /// Market pulse — small always-present context layer, refreshed every 5 minutes.
 pub struct MarketPulse {
