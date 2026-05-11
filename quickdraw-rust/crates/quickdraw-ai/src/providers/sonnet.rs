@@ -1,31 +1,20 @@
-use anyhow::{bail, Result};
+use anyhow::Result;
 use async_trait::async_trait;
-use reqwest::Client;
-use std::time::{Duration, Instant};
 
 use crate::provider::{AIProvider, AIRequest, AIResponse, TokenStream};
 use crate::providers::haiku::HaikuProvider;
 
 const MODEL: &str = "claude-sonnet-4-6";
 
-/// Sonnet provider — same structure as Haiku, routes to /ai/deep on the Worker.
+/// Sonnet provider — delegates to HaikuProvider (same Worker protocol, same endpoint).
 /// Used for ScreenAnalysis, DeepTokenReport, YieldStrategy, PortfolioAnalysis.
 pub struct SonnetProvider {
-    client: Client,
-    worker_url: String,
-    app_secret: String,
+    inner: HaikuProvider,
 }
 
 impl SonnetProvider {
     pub fn new(worker_url: impl Into<String>, app_secret: impl Into<String>) -> Self {
-        Self {
-            client: Client::builder()
-                .timeout(Duration::from_secs(60))
-                .build()
-                .expect("reqwest client"),
-            worker_url: worker_url.into(),
-            app_secret: app_secret.into(),
-        }
+        Self { inner: HaikuProvider::new(worker_url, app_secret) }
     }
 }
 
@@ -38,25 +27,16 @@ impl AIProvider for SonnetProvider {
     fn supports_streaming(&self) -> bool { true }
 
     async fn complete(&self, req: AIRequest) -> Result<AIResponse> {
-        // Sonnet uses /ai/deep on the Worker — same protocol as Haiku
-        // Delegate to Haiku's implementation with a different endpoint
-        let haiku = HaikuProvider::new(self.worker_url.clone(), self.app_secret.clone());
-        let mut resp = haiku.complete(req).await?;
+        let mut resp = self.inner.complete(req).await?;
         resp.provider_used = MODEL.into();
         Ok(resp)
     }
 
     async fn stream(&self, req: AIRequest) -> Result<TokenStream> {
-        let haiku = HaikuProvider::new(self.worker_url.clone(), self.app_secret.clone());
-        haiku.stream(req).await
+        self.inner.stream(req).await
     }
 
     async fn health_check(&self) -> bool {
-        self.client
-            .get(format!("{}/health", self.worker_url))
-            .send()
-            .await
-            .map(|r| r.status().is_success())
-            .unwrap_or(false)
+        self.inner.health_check().await
     }
 }

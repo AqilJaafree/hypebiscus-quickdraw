@@ -1,4 +1,3 @@
-use anyhow::Result;
 use hmac::{Hmac, Mac};
 use reqwest::{Client, RequestBuilder};
 use sha2::Sha256;
@@ -18,6 +17,7 @@ impl WorkerClient {
         Self {
             client: Client::builder()
                 .timeout(std::time::Duration::from_secs(10))
+                .local_address("0.0.0.0".parse::<std::net::IpAddr>().ok()) // force IPv4
                 .build()
                 .expect("reqwest client"),
             worker_url: worker_url.into(),

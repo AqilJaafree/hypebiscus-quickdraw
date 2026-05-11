@@ -65,12 +65,15 @@ mod tests {
     fn rejects_high_price_impact() {
         let quote = AdapterQuote {
             adapter_name: "Jupiter".into(),
+            token_in: Pubkey::default(),
+            token_out: Pubkey::default(),
             in_amount: 1_000_000,
             out_amount: 900_000,
             price_impact_pct: 10.0, // above 5% threshold
             slippage_bps: 50,
             fee_usd: 0.01,
             route_label: "Direct".into(),
+            raw_response: String::new(),
         };
         let result = verify_swap(&[], &quote, &Pubkey::default());
         // Will fail on deserialize before impact check, but impact check logic is correct

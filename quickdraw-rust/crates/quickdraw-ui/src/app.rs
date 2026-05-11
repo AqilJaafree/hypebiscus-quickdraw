@@ -1,10 +1,11 @@
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Mutex, RwLock};
 use std::sync::atomic::{AtomicBool, Ordering};
 use egui::{Margin, Rounding, Stroke};
 use tokio::sync::mpsc;
 
 use quickdraw_core::{commands::Command, state::AppSnapshot};
 use crate::design::{Colors, Tokens};
+use crate::guide_overlay::{CursorAnimState, GuideAnimState, show_guide_cursor, show_guide_overlay};
 use crate::panel::draw_panel_content;
 use crate::wallet_ui::WalletUiState;
 use crate::header;
@@ -12,13 +13,16 @@ use crate::header;
 /// Main window = settings panel (always visible on startup).
 /// Token popup  = deferred viewport that appears near cursor on detection.
 /// Swap popup   = second deferred viewport below the token popup, opens on BUY.
+/// Guide overlay = fullscreen transparent viewport for AI-guided tutorials.
 pub struct QuickdrawApp {
     snapshot:      Arc<RwLock<AppSnapshot>>,
     cmd_tx:        mpsc::Sender<Command>,
     demo_mode:     bool,
     wallet_ui:     WalletUiState,
     swap_open:     Arc<AtomicBool>,
-    swap_anchored: Arc<AtomicBool>, // true after swap popup has been positioned once
+    swap_anchored: Arc<AtomicBool>,
+    guide_anim:    Arc<Mutex<GuideAnimState>>,
+    cursor_anim:   Arc<Mutex<CursorAnimState>>,
 }
 
 impl QuickdrawApp {
@@ -37,6 +41,8 @@ impl QuickdrawApp {
             wallet_ui:     WalletUiState::default(),
             swap_open:     Arc::new(AtomicBool::new(false)),
             swap_anchored: Arc::new(AtomicBool::new(false)),
+            guide_anim:    Arc::new(Mutex::new(GuideAnimState::default())),
+            cursor_anim:   Arc::new(Mutex::new(CursorAnimState::new())),
         }
     }
 }
@@ -61,6 +67,8 @@ impl eframe::App for QuickdrawApp {
 
         show_token_popup(ctx, &snap, self.snapshot.clone(), self.cmd_tx.clone(), self.demo_mode, self.swap_open.clone());
         show_swap_popup(ctx, &snap, self.snapshot.clone(), self.cmd_tx.clone(), self.swap_open.clone(), self.swap_anchored.clone());
+        show_guide_overlay(ctx, &snap, self.snapshot.clone(), self.cmd_tx.clone(), self.guide_anim.clone());
+        show_guide_cursor(ctx, &snap, self.snapshot.clone(), self.cursor_anim.clone());
     }
 }
 
@@ -80,7 +88,15 @@ fn show_token_popup(
     demo_mode: bool,
     swap_open: Arc<AtomicBool>,
 ) {
-    if !snap.overlay_visible { return; }
+    if !snap.overlay_visible {
+        // Reset the auto-dismiss timer whenever the overlay is hidden — covers
+        // manual dismiss (Cancel / Escape / DismissOverlay) in addition to the
+        // auto-dismiss path. Without this, re-opening after a manual dismiss
+        // uses a stale timestamp and the popup disappears immediately.
+        SHOWN_AT.with(|t| t.set(None));
+        PREV_AI.with(|t| t.set(false));
+        return;
+    }
 
     let pos_x = snap.overlay_position.x + 20.0;
     let pos_y = snap.overlay_position.y + 10.0;

@@ -8,18 +8,14 @@
 
 use anyhow::{bail, Result};
 use async_trait::async_trait;
-use base64::Engine;
-use serde::{Deserialize, Serialize};
 use solana_sdk::pubkey::Pubkey;
-use std::str::FromStr;
 use std::sync::Arc;
 use tokio::sync::{Mutex, RwLock};
-use tracing::{debug, info, warn};
+use tracing::info;
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
 use super::bridge::WalletBridge;
 
-// WalletConnect v2 relay (public relay — no auth needed for pairing)
 #[allow(dead_code)]
 const WC_RELAY: &str = "wss://relay.walletconnect.com";
 const WC_PROJECT_ID: &str = "REOWN_PROJECT_ID_PLACEHOLDER";
@@ -38,7 +34,6 @@ struct SessionKey([u8; 32]);
 pub struct WalletConnectBridge {
     state: Arc<RwLock<WalletConnectState>>,
     session_key: Arc<Mutex<Option<SessionKey>>>,
-    http: reqwest::Client,
 }
 
 impl WalletConnectBridge {
@@ -46,7 +41,6 @@ impl WalletConnectBridge {
         Self {
             state: Arc::new(RwLock::new(WalletConnectState::Disconnected)),
             session_key: Arc::new(Mutex::new(None)),
-            http: reqwest::Client::new(),
         }
     }
 
@@ -144,12 +138,10 @@ impl WalletBridge for WalletConnectBridge {
         Ok(())
     }
 
-    async fn sign_transaction(&self, tx_bytes: &[u8]) -> Result<Vec<u8>> {
+    async fn sign_transaction(&self, _tx_bytes: &[u8]) -> Result<Vec<u8>> {
         let state = self.state.read().await;
         match &*state {
             WalletConnectState::Connected { .. } => {
-                // Real impl: send wc_sessionRequest with solana_signTransaction
-                // over the relay WebSocket, wait for the signed tx response.
                 bail!("WalletConnect transaction signing not yet implemented")
             }
             _ => bail!("Wallet not connected"),
@@ -171,9 +163,6 @@ pub fn render_qr_to_rgba(uri: &str) -> Result<(Vec<u8>, u32, u32)> {
     use qrcode::{QrCode, EcLevel};
 
     let code = QrCode::with_error_correction_level(uri.as_bytes(), EcLevel::M)?;
-    let image = code.render::<qrcode::render::unicode::Dense1x2>()
-        .quiet_zone(true)
-        .build();
 
     // Convert to pixel grid: each "module" is 8×8 pixels, black on white
     let module_size = 8u32;

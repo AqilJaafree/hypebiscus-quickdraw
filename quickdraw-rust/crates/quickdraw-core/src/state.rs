@@ -1,6 +1,7 @@
 use solana_sdk::pubkey::Pubkey;
 use uuid::Uuid;
 
+use crate::guide::GuideStep;
 use crate::types::{
     AdapterQuote, DetectionSource, Point, SafetyReport, TokenPrice, YieldPosition,
 };
@@ -87,6 +88,10 @@ pub struct AppState {
     pub ai_mode: AiMode,
     pub settings_visible: bool,
     pub detection_enabled: bool,
+    pub guide_active:     bool,
+    pub guide_fetching:   bool,
+    pub guide_steps:      Vec<GuideStep>,
+    pub guide_step_index: usize,
     pub version: u64,
 }
 
@@ -110,6 +115,10 @@ impl Default for AppState {
             overlay_position: Default::default(),
             ai_mode: Default::default(),
             settings_visible: false,
+            guide_active: false,
+            guide_fetching: false,
+            guide_steps: Vec::new(),
+            guide_step_index: 0,
             version: 0,
         }
     }
@@ -135,6 +144,10 @@ impl AppState {
             ai_mode: self.ai_mode,
             settings_visible: self.settings_visible,
             detection_enabled: self.detection_enabled,
+            guide_active: self.guide_active,
+            guide_fetching: self.guide_fetching,
+            guide_steps: self.guide_steps.clone(),
+            guide_step_index: self.guide_step_index,
             version: self.version,
         }
     }
@@ -160,6 +173,10 @@ pub struct AppSnapshot {
     pub ai_mode: AiMode,
     pub settings_visible: bool,
     pub detection_enabled: bool,
+    pub guide_active:     bool,
+    pub guide_fetching:   bool,
+    pub guide_steps:      Vec<GuideStep>,
+    pub guide_step_index: usize,
     pub version: u64,
 }
 

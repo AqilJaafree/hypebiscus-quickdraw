@@ -1,11 +1,11 @@
 use anyhow::{bail, Result};
 use async_trait::async_trait;
-use futures::{Stream, StreamExt};
+use futures::StreamExt;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
-use crate::provider::{AIProvider, AIRequest, AIResponse, Message, TokenStream};
+use crate::provider::{AIProvider, AIRequest, AIResponse, TokenStream};
 
 const DEFAULT_URL: &str = "http://localhost:11434";
 
@@ -31,6 +31,7 @@ struct OllamaOptions {
 #[derive(Deserialize)]
 struct OllamaChunk {
     message: Option<OllamaMessageContent>,
+    #[allow(dead_code)]
     done: bool,
 }
 
@@ -110,13 +111,6 @@ impl AIProvider for OllamaProvider {
     }
 
     async fn stream(&self, req: AIRequest) -> Result<TokenStream> {
-        let system_msg = format!("system: {}", req.system_static);
-        let system_owned = system_msg.clone();
-
-        let messages_owned: Vec<(String, String)> = req.messages.iter()
-            .map(|m| (m.role.clone(), m.content.clone()))
-            .collect();
-
         let body = serde_json::json!({
             "model": self.model,
             "messages": std::iter::once(serde_json::json!({"role": "system", "content": req.system_static}))

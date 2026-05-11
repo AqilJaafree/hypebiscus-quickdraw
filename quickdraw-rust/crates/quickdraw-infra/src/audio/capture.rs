@@ -8,7 +8,7 @@ use anyhow::{bail, Result};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use rubato::{FftFixedIn, Resampler};
 use tokio::sync::mpsc;
-use tracing::{debug, info, warn};
+use tracing::{info, warn};
 use zeroize::Zeroizing;
 
 pub const TARGET_SAMPLE_RATE: u32 = 16_000;
@@ -51,13 +51,14 @@ impl CaptureHandle {
             cpal::SampleFormat::F32 => {
                 let tx = tx_clone;
                 let mut buf: Vec<f32> = Vec::new();
+                // Resampler operates on 1 channel — we mix to mono before resampling.
                 let mut resampler: Option<FftFixedIn<f32>> = if needs_resample {
                     Some(FftFixedIn::<f32>::new(
                         src_rate as usize,
                         TARGET_SAMPLE_RATE as usize,
                         FRAME_SAMPLES,
                         2,
-                        src_channels,
+                        1,
                     )?)
                 } else {
                     None
