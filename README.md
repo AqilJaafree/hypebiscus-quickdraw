@@ -1,4 +1,4 @@
-# Quickdraw
+ # Quickdraw
 
 **Passive DeFi intelligence for Solana traders.** Highlight or copy a token address anywhere on your desktop — Discord, Telegram, a terminal, a tweet, a PDF — and a compact popup appears near your cursor with the token's safety score, live price, and an AI-written summary. One click to swap, no context switch required.
 

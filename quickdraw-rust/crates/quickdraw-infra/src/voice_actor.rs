@@ -60,7 +60,22 @@ impl VoiceActor {
         tokio::spawn(async move {
             loop {
                 tokio::select! {
-                    _ = &mut stop_rx => break,
+                    _ = &mut stop_rx => {
+                        // Drain any final Turn events that arrived just before stop,
+                        // giving AssemblyAI up to 600ms to deliver the last transcript.
+                        let deadline = tokio::time::Instant::now()
+                            + tokio::time::Duration::from_millis(600);
+                        loop {
+                            match tokio::time::timeout_at(deadline, transcript_rx.recv()).await {
+                                Ok(Some(event)) if event.is_final && !event.text.is_empty() => {
+                                    tracing::info!(transcript = %event.text, "final transcript (drained)");
+                                    let _ = cmd_tx.send(Command::VoiceTranscript(event.text)).await;
+                                }
+                                _ => break,
+                            }
+                        }
+                        break;
+                    }
                     Some(event) = transcript_rx.recv() => {
                         if event.is_final && !event.text.is_empty() {
                             tracing::info!(transcript = %event.text, "final transcript");

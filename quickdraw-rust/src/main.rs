@@ -187,7 +187,7 @@ async fn engine_task(
         let http_warm = http.clone();
         tokio::spawn(async move {
             let wsol = "So11111111111111111111111111111111111111112";
-            let _ = http_warm.get(format!("https://lite-api.jup.ag/tokens/v2/search?query={wsol}")).send().await;
+            let _ = http_warm.get(format!("https://api.jup.ag/tokens/v2/search?query={wsol}")).send().await;
             info!("HTTP connection pool warmed");
         });
     }
@@ -663,7 +663,7 @@ async fn fetch_jupiter_safety(
         #[serde(rename = "stats24h")]          stats24h:       Option<Stats>,
     }
 
-    let url = format!("https://lite-api.jup.ag/tokens/v2/search?query={token}");
+    let url = format!("https://api.jup.ag/tokens/v2/search?query={token}");
     let results: Vec<JupToken> = http
         .get(&url)
         .send().await?
