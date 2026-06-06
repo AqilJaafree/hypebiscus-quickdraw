@@ -38,6 +38,21 @@ export function createPopup(opts: PopupOptions): PopupController {
     opts.callbacks.onDismiss();
   });
 
+  // Wire copy address
+  const copyEl = shadow.getElementById("qd-copy");
+  if (copyEl) {
+    copyEl.addEventListener("click", () => {
+      navigator.clipboard.writeText(opts.address).then(() => {
+        const span = copyEl.querySelector("span");
+        if (!span) return;
+        const prev = span.textContent;
+        span.textContent = "COPIED!";
+        copyEl.style.color = "#8BF542";
+        setTimeout(() => { span.textContent = prev; copyEl.style.color = ""; }, 1000);
+      }).catch(() => {});
+    });
+  }
+
   // Wire swap / connect button
   shadow.getElementById("qd-swap")?.addEventListener("click", () => {
     opts.callbacks.onSwapClick();
@@ -180,6 +195,18 @@ function buildShell(address: string): string {
     font-size: 10px;
     color: #555;
     letter-spacing: 0.04em;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    user-select: none;
+  }
+  .qd-addr:hover { color: #888; }
+  .qd-addr:hover .qd-copy-icon { opacity: 1; }
+  .qd-copy-icon {
+    opacity: 0;
+    font-size: 9px;
+    transition: opacity 0.1s;
   }
   #qd-price {
     padding: 6px 12px 2px;
@@ -233,7 +260,7 @@ function buildShell(address: string): string {
     </div>
     <button id="qd-close" title="Dismiss">✕</button>
   </div>
-  <div class="qd-addr">${short}</div>
+  <div class="qd-addr" id="qd-copy"><span>${short}</span><span class="qd-copy-icon">⧉</span></div>
   <div id="qd-price"></div>
   <div id="qd-narration">Fetching…</div>
   <div id="qd-footer">
