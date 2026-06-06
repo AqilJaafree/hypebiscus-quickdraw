@@ -20,6 +20,7 @@ export function injectWalletBridge(): Promise<void> {
     window.addEventListener("__qd_ready", onReady);
 
     const script = document.createElement("script");
+    script.type = "module";
     script.src = chrome.runtime.getURL("dist/wallet-bridge.js");
     document.documentElement.appendChild(script);
     script.remove();
