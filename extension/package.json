@@ -5,7 +5,7 @@
   "scripts": {
     "build": "esbuild src/content.ts src/background.ts src/popup.ts src/wallet-bridge.ts --bundle --outdir=dist --target=chrome111 --format=esm --define:__WORKER_URL__='\"http://localhost:8787\"' --define:__EXTENSION_SECRET__='\"dev-extension-secret-change-in-prod\"'",
     "watch": "esbuild src/content.ts src/background.ts src/popup.ts src/wallet-bridge.ts --bundle --outdir=dist --target=chrome111 --format=esm --define:__WORKER_URL__='\"http://localhost:8787\"' --define:__EXTENSION_SECRET__='\"dev-extension-secret-change-in-prod\"' --watch",
-    "build:prod": "esbuild src/content.ts src/background.ts src/popup.ts src/wallet-bridge.ts --bundle --outdir=dist --target=chrome111 --format=esm --define:__WORKER_URL__='\"https://your-worker.workers.dev\"' --define:__EXTENSION_SECRET__='\"YOUR_SECRET_HERE\"'",
+    "build:prod": "esbuild src/content.ts src/background.ts src/popup.ts src/wallet-bridge.ts --bundle --outdir=dist --target=chrome111 --format=esm --define:__WORKER_URL__='\"https://quickdraw-worker.wanaqilre.workers.dev\"' --define:__EXTENSION_SECRET__='\"REPLACE_WITH_SECRET\"'",
     "test": "vitest run",
     "test:watch": "vitest"
   },
