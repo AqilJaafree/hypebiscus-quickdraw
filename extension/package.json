@@ -3,12 +3,19 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "build": "esbuild src/content.ts src/background.ts --bundle --outdir=dist --target=chrome110 --format=esm",
-    "watch": "esbuild src/content.ts src/background.ts --bundle --outdir=dist --target=chrome110 --format=esm --watch"
+    "build": "esbuild src/content.ts src/background.ts src/popup.ts src/wallet-bridge.ts --bundle --outdir=dist --target=chrome111 --format=esm",
+    "watch": "esbuild src/content.ts src/background.ts src/popup.ts src/wallet-bridge.ts --bundle --outdir=dist --target=chrome111 --format=esm --watch",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "devDependencies": {
     "@types/chrome": "^0.0.268",
+    "@vitest/coverage-v8": "^1.6.0",
     "esbuild": "^0.20.0",
-    "typescript": "^5.3.3"
+    "typescript": "^5.3.3",
+    "vitest": "^1.6.0"
+  },
+  "dependencies": {
+    "@solana/web3.js": "^1.95.3"
   }
 }
