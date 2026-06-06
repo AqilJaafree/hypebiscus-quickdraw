@@ -2,12 +2,14 @@
   "manifest_version": 3,
   "name": "Quickdraw",
   "version": "0.1.0",
-  "description": "Instant Solana token analysis — highlight any address to see the organic score.",
+  "description": "Instant Solana token analysis — detect any address anywhere, score it, swap it.",
+  "minimum_chrome_version": "111",
   "permissions": [
-    "nativeMessaging"
+    "storage",
+    "scripting"
   ],
   "host_permissions": [
-    "https://lite-api.jup.ag/*"
+    "<all_urls>"
   ],
   "background": {
     "service_worker": "dist/background.js"
@@ -17,6 +19,12 @@
       "matches": ["<all_urls>"],
       "js": ["dist/content.js"],
       "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["dist/wallet-bridge.js"],
+      "matches": ["<all_urls>"]
     }
   ],
   "icons": {

@@ -5,7 +5,7 @@ const SOLANA_ADDR = /\b[1-9A-HJ-NP-Za-km-z]{32,44}\b/g;
 const TICKER = /\$[A-Z]{2,10}\b/g;
 
 // Known non-token base58 strings to skip (tx hashes, pubkeys that aren't tokens)
-const BLOCKLIST = new Set([
+export const BLOCKLIST = new Set([
   "11111111111111111111111111111111", // System program
   "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA", // Token program
   "ATokenGPvbdGVxr1j5M25s4f247jZ7k8pU7wQc3w",   // ATA program
@@ -40,4 +40,33 @@ export function detectInSelection(): Detection | null {
   }
 
   return null;
+}
+
+export function detectInText(text: string): Array<{ type: "address" | "ticker"; value: string }> {
+  const results: Array<{ type: "address" | "ticker"; value: string }> = [];
+  const seen = new Set<string>();
+
+  // Addresses
+  const addrMatches = text.matchAll(/\b[1-9A-HJ-NP-Za-km-z]{32,44}\b/g);
+  for (const m of addrMatches) {
+    const addr = m[0];
+    if (!BLOCKLIST.has(addr) && !seen.has(addr)) {
+      seen.add(addr);
+      results.push({ type: "address", value: addr });
+    }
+  }
+
+  // $TICKER — only if no address found in same text
+  if (results.length === 0) {
+    const tickerMatches = text.matchAll(/\$([A-Z]{2,10})\b/g);
+    for (const m of tickerMatches) {
+      const ticker = m[1];
+      if (!seen.has(ticker)) {
+        seen.add(ticker);
+        results.push({ type: "ticker", value: ticker });
+      }
+    }
+  }
+
+  return results;
 }
