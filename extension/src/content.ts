@@ -120,7 +120,7 @@ function onSelectionChange(): void {
     const detection = detectInSelection();
     if (!detection || detection.type !== "address") return;
     const rect = detection.rect;
-    triggerAddress(detection.value, rect.left + window.scrollX, rect.bottom + window.scrollY);
+    triggerAddress(detection.value, rect.left, rect.bottom);
   }, DEBOUNCE_MS);
 }
 
