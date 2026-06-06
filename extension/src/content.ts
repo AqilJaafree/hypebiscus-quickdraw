@@ -28,23 +28,13 @@ let activeController: PopupController | null = null;
 let detectionEnabled = true;
 
 async function triggerAddress(address: string, rawX: number, rawY: number): Promise<void> {
-  detectionEnabled = await sendBg<boolean>({ type: "get_detection_enabled" }).catch(() => true);
   if (!detectionEnabled) return;
 
-  let tokenData: TokenData;
-  try {
-    tokenData = await sendBg<TokenData>({ type: "fetch_token", address });
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : "";
-    if (msg === "dedup") return;
-    return;
-  }
-
-  const wallet: WalletState = await sendBg<WalletState>({ type: "get_wallet" }).catch(() => ({
-    address: null, adapter: null, connected: false,
-  }));
-
   const { x, y } = clampPosition(rawX, rawY);
+
+  // Show loading popup immediately — user sees feedback right away
+  let walletState: WalletState = { address: null, adapter: null, connected: false };
+  let tokenData: TokenData | null = null;
 
   const controller = createPopup({
     address,
@@ -53,17 +43,19 @@ async function triggerAddress(address: string, rawX: number, rawY: number): Prom
     callbacks: {
       onDismiss: () => { activeController = null; },
       onSwapClick: async () => {
-        let w = wallet;
+        let w = walletState;
         if (!w.connected) {
           try {
             await injectWalletBridge();
             w = await connectWallet();
+            walletState = w;
           } catch {
             controller.showError("No wallet found. Install Phantom or Backpack.");
             return;
           }
+        } else {
+          await injectWalletBridge();
         }
-        await injectWalletBridge();
         const panel = buildSwapPanel(address, w, {
           onSuccess: (sig) => {
             controller.showError(`✓ Swapped! ${sig.slice(0, 8)}…`);
@@ -76,7 +68,8 @@ async function triggerAddress(address: string, rawX: number, rawY: number): Prom
       onConnectWallet: async () => {
         try {
           const w = await connectWallet();
-          controller.showToken(tokenData.safety, tokenData.price, w);
+          walletState = w;
+          if (tokenData) controller.showToken(tokenData.safety, tokenData.price, w);
         } catch {
           controller.showError("No wallet found.");
         }
@@ -86,7 +79,26 @@ async function triggerAddress(address: string, rawX: number, rawY: number): Prom
 
   activeController = controller;
 
-  controller.showToken(tokenData.safety, tokenData.price, wallet);
+  // Fetch wallet + token data in parallel
+  const [wallet, fetchResult] = await Promise.allSettled([
+    sendBg<WalletState>({ type: "get_wallet" }),
+    sendBg<TokenData>({ type: "fetch_token", address }),
+  ]);
+
+  if (wallet.status === "fulfilled") walletState = wallet.value;
+
+  if (fetchResult.status === "rejected") {
+    const msg = fetchResult.reason instanceof Error ? fetchResult.reason.message : "";
+    if (msg === "dedup") {
+      // Already shown recently — close silently
+      removePopup(); activeController = null; return;
+    }
+    controller.showError(msg || "Token not found on Jupiter");
+    return;
+  }
+
+  tokenData = fetchResult.value;
+  controller.showToken(tokenData.safety, tokenData.price, walletState);
 
   streamNarration(
     address,
