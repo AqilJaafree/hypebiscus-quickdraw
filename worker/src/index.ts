@@ -24,6 +24,7 @@
 export interface Env {
   ANTHROPIC_API_KEY: string;
   APP_SECRET: string;
+  EXTENSION_SECRET: string;
   HELIUS_API_KEY: string;
   ASSEMBLYAI_API_KEY: string;
   REOWN_PROJECT_ID: string;
@@ -363,6 +364,21 @@ export default {
       return new Response(authPage(callback, env.REOWN_PROJECT_ID), {
         headers: { "Content-Type": "text/html; charset=utf-8" },
       });
+    }
+
+    // Extension bearer-token auth — covers /ai/fast only
+    // The extension cannot sign HMAC (no shared secret in client code).
+    // EXTENSION_SECRET is a separate Worker secret, not APP_SECRET.
+    if (req.headers.get("X-Quickdraw-Client") === "extension") {
+      const bearer = req.headers.get("Authorization") ?? "";
+      const secret = bearer.startsWith("Bearer ") ? bearer.slice(7) : "";
+      if (!secret || secret !== env.EXTENSION_SECRET) {
+        return err("Unauthorized", 401);
+      }
+      if (url.pathname === "/ai/fast" && req.method === "POST") {
+        return handleAi(req, env, "claude-haiku-4-5-20251001");
+      }
+      return err("Not found", 404);
     }
 
     // All other routes require HMAC auth
