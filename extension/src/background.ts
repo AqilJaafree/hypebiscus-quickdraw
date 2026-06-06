@@ -1,11 +1,11 @@
-import { fetchTokenSafety, fetchTokenPrice } from "./jupiter-client";
-import type { BgRequest, BgResponse, TokenData, WalletState } from "./types";
+import { fetchToken } from "./jupiter-client";
+import type { BgRequest, BgResponse, SafetyScore, TokenData, TokenPrice, WalletState } from "./types";
 
 // ── Cache ──────────────────────────────────────────────────────────────────────
 interface CacheEntry<T> { data: T; expiresAt: number; }
 
-const safetyCache = new Map<string, CacheEntry<Awaited<ReturnType<typeof fetchTokenSafety>>>>();
-const priceCache  = new Map<string, CacheEntry<Awaited<ReturnType<typeof fetchTokenPrice>>>>();
+const safetyCache = new Map<string, CacheEntry<SafetyScore>>();
+const priceCache  = new Map<string, CacheEntry<TokenPrice | null>>();
 const dedupMap    = new Map<string, number>(); // address → last triggered timestamp
 
 const SAFETY_TTL_MS = 300_000; // 5 min
@@ -27,26 +27,21 @@ loadWalletFromStorage();
 
 // ── Token fetch ────────────────────────────────────────────────────────────────
 async function getTokenData(address: string): Promise<TokenData> {
-  // Safety
-  let safety = isFresh(safetyCache.get(address))
-    ? safetyCache.get(address)!.data
-    : null;
-  if (!safety) {
-    safety = await fetchTokenSafety(address);
-    if (safety) safetyCache.set(address, { data: safety, expiresAt: Date.now() + SAFETY_TTL_MS });
-  }
-  if (!safety) throw new Error("Token not found on Jupiter");
+  const safetyFresh = isFresh(safetyCache.get(address));
+  const priceFresh  = isFresh(priceCache.get(address));
 
-  // Price
-  let price = isFresh(priceCache.get(address))
-    ? priceCache.get(address)!.data
-    : null;
-  if (!price) {
-    price = await fetchTokenPrice(address);
-    priceCache.set(address, { data: price, expiresAt: Date.now() + PRICE_TTL_MS });
+  if (!safetyFresh || !priceFresh) {
+    const token = await fetchToken(address);
+    if (!token) throw new Error("Token not found on Jupiter");
+    if (!safetyFresh) safetyCache.set(address, { data: token.safety, expiresAt: Date.now() + SAFETY_TTL_MS });
+    if (!priceFresh)  priceCache.set(address,  { data: token.price,  expiresAt: Date.now() + PRICE_TTL_MS  });
   }
 
-  return { address, safety, price };
+  return {
+    address,
+    safety: safetyCache.get(address)!.data,
+    price:  priceCache.get(address)!.data ?? null,
+  };
 }
 
 // ── Message handler ────────────────────────────────────────────────────────────

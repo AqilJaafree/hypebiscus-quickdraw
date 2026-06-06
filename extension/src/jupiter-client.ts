@@ -2,30 +2,45 @@ import { computeSafetyScore } from "./score";
 import type { SafetyScore, TokenPrice, SwapQuote } from "./types";
 
 const JUPITER_SEARCH = "https://lite-api.jup.ag/tokens/v2/search";
-const JUPITER_PRICE  = "https://api.jup.ag/price/v2";
 const JUPITER_QUOTE  = "https://quote-api.jup.ag/v6/quote";
 const JUPITER_SWAP   = "https://quote-api.jup.ag/v6/swap";
 
-export async function fetchTokenSafety(address: string): Promise<SafetyScore | null> {
-  const resp = await fetch(`${JUPITER_SEARCH}?query=${encodeURIComponent(address)}`);
-  if (!resp.ok) throw new Error("Jupiter API error");
-  const results = await resp.json() as unknown[];
-  if (!results.length) return null;
-  return computeSafetyScore(results[0] as Parameters<typeof computeSafetyScore>[0]);
+interface SearchResult {
+  id: string;
+  name: string;
+  symbol: string;
+  usdPrice?: number;
+  organicScore?: number;
+  isVerified?: boolean;
+  audit?: {
+    isSus?: boolean;
+    mintAuthorityDisabled?: boolean;
+    freezeAuthorityDisabled?: boolean;
+  };
+  stats24h?: { priceChange?: number };
 }
 
-export async function fetchTokenPrice(address: string): Promise<TokenPrice | null> {
-  const resp = await fetch(`${JUPITER_PRICE}?ids=${address}&showExtraInfo=true`);
-  if (!resp.ok) return null;
-  const body = await resp.json() as { data: Record<string, { price: number; mintSymbol?: string }> };
-  const entry = body.data[address];
-  if (!entry) return null;
-  return {
-    usd: entry.price,
-    change24h: 0,
-    symbol: entry.mintSymbol ?? address.slice(0, 4),
-    name: entry.mintSymbol ?? "Unknown",
-  };
+export async function fetchToken(
+  address: string,
+): Promise<{ safety: SafetyScore; price: TokenPrice | null } | null> {
+  const resp = await fetch(`${JUPITER_SEARCH}?query=${encodeURIComponent(address)}&limit=1`);
+  if (!resp.ok) throw new Error("Jupiter API error");
+  const results = await resp.json() as SearchResult[];
+  const token = results.find((r) => r.id === address);
+  if (!token) return null;
+
+  const safety = computeSafetyScore(token);
+  const price: TokenPrice | null =
+    token.usdPrice != null
+      ? {
+          usd: token.usdPrice,
+          change24h: token.stats24h?.priceChange ?? 0,
+          symbol: token.symbol,
+          name: token.name,
+        }
+      : null;
+
+  return { safety, price };
 }
 
 export interface QuoteParams {
