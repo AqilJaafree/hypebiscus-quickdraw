@@ -56,12 +56,14 @@ async function triggerAddress(address: string, rawX: number, rawY: number): Prom
         let w = wallet;
         if (!w.connected) {
           try {
+            await injectWalletBridge();
             w = await connectWallet();
           } catch {
             controller.showError("No wallet found. Install Phantom or Backpack.");
             return;
           }
         }
+        await injectWalletBridge();
         const panel = buildSwapPanel(address, w, {
           onSuccess: (sig) => {
             controller.showError(`✓ Swapped! ${sig.slice(0, 8)}…`);
@@ -121,9 +123,16 @@ document.addEventListener("mousedown", (e) => {
 });
 
 // ── MutationObserver ───────────────────────────────────────────────────────────
-const observer = new MutationObserver((mutations) => {
-  if (!detectionEnabled) return;
-  for (const mutation of mutations) {
+// Batched: collect mutations for 500ms then process once to avoid flooding on
+// address-heavy pages like Solscan, Jupiter, and Meteora.
+let mutationQueue: MutationRecord[] = [];
+let mutationTimer: ReturnType<typeof setTimeout> | null = null;
+
+function processMutations(): void {
+  if (!detectionEnabled) { mutationQueue = []; return; }
+  const batch = mutationQueue;
+  mutationQueue = [];
+  for (const mutation of batch) {
     for (const node of mutation.addedNodes) {
       if (node.nodeType !== Node.TEXT_NODE) continue;
       const text = (node as Text).textContent ?? "";
@@ -136,15 +145,19 @@ const observer = new MutationObserver((mutations) => {
       const first = detections[0];
       if (first.type === "address") {
         triggerAddress(first.value, rect.left, rect.bottom);
-        break;
+        return; // one trigger per batch — avoid flooding
       }
     }
   }
+}
+
+const observer = new MutationObserver((mutations) => {
+  mutationQueue.push(...mutations);
+  if (mutationTimer) clearTimeout(mutationTimer);
+  mutationTimer = setTimeout(processMutations, 500);
 });
 
 observer.observe(document.body, { childList: true, subtree: true });
-
-injectWalletBridge().catch(() => {});
 
 sendBg<boolean>({ type: "get_detection_enabled" })
   .then((enabled) => { detectionEnabled = enabled; })
