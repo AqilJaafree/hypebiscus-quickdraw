@@ -1,99 +1,151 @@
-import { detectInSelection } from "./detector";
-import { showTooltip, removeTooltip } from "./tooltip";
+import { detectInSelection, detectInText } from "./detector";
+import { createPopup, removePopup, PopupController } from "./popup-ui";
+import { buildSwapPanel } from "./swap-panel";
+import { getWallet, connectWallet, injectWalletBridge } from "./wallet";
+import { streamNarration } from "./worker-client";
+import type { BgRequest, BgResponse, TokenData, WalletState } from "./types";
 
-const DEBOUNCE_MS  = 400;
-const COOLDOWN_MS  = 30_000; // don't re-fire same address within 30s
+// ── Helpers ────────────────────────────────────────────────────────────────────
+function sendBg<T>(msg: BgRequest): Promise<T> {
+  return new Promise((resolve, reject) => {
+    chrome.runtime.sendMessage(msg, (resp: BgResponse<T>) => {
+      if (chrome.runtime.lastError) { reject(new Error(chrome.runtime.lastError.message)); return; }
+      if (resp.ok) resolve(resp.data);
+      else reject(new Error(resp.error));
+    });
+  });
+}
 
-const seen = new Map<string, number>();
-let debounce: ReturnType<typeof setTimeout> | null = null;
+function clampPosition(x: number, y: number): { x: number; y: number } {
+  const POP_W = 288, POP_H = 240;
+  const cx = x + POP_W > window.innerWidth  ? x - POP_W - 8 : x + 16;
+  const cy = y + POP_H > window.innerHeight ? y - POP_H - 8 : y + 8;
+  return { x: Math.max(8, cx), y: Math.max(8, cy) };
+}
 
-document.addEventListener("mouseup", () => {
-  if (debounce) clearTimeout(debounce);
-  debounce = setTimeout(onSelection, DEBOUNCE_MS);
-});
+// ── Detection lifecycle ────────────────────────────────────────────────────────
+let activeController: PopupController | null = null;
+let detectionEnabled = true;
 
-document.addEventListener("keyup", (e) => {
-  if (e.shiftKey) {
-    if (debounce) clearTimeout(debounce);
-    debounce = setTimeout(onSelection, DEBOUNCE_MS);
-  }
-});
+async function triggerAddress(address: string, rawX: number, rawY: number): Promise<void> {
+  detectionEnabled = await sendBg<boolean>({ type: "get_detection_enabled" }).catch(() => true);
+  if (!detectionEnabled) return;
 
-// Dismiss on Escape or click outside
-document.addEventListener("keydown", (e) => {
-  if (e.key === "Escape") removeTooltip();
-});
-document.addEventListener("mousedown", (e) => {
-  const tooltip = document.getElementById("quickdraw-tooltip");
-  if (tooltip && !tooltip.contains(e.target as Node)) removeTooltip();
-});
-
-async function onSelection() {
-  const detection = detectInSelection();
-  if (!detection || detection.type !== "address") return;
-
-  const addr = detection.value;
-  const now  = Date.now();
-
-  // Cooldown check
-  const lastSeen = seen.get(addr);
-  if (lastSeen && now - lastSeen < COOLDOWN_MS) return;
-  seen.set(addr, now);
-
-  // Show tooltip immediately with loading state
-  showTooltip(detection.rect, addr, null, "Fetching Jupiter data…");
-
-  // Fetch organic score from Jupiter (no API key needed)
+  let tokenData: TokenData;
   try {
-    const data = await fetchJupiterScore(addr);
-    showTooltip(detection.rect, addr, data.score, data.summary);
-  } catch {
-    showTooltip(detection.rect, addr, null, "Score unavailable");
+    tokenData = await sendBg<TokenData>({ type: "fetch_token", address });
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : "";
+    if (msg === "dedup") return;
+    return;
   }
 
-  // Also notify native app if available (best-effort)
-  chrome.runtime.sendMessage({
-    type: "token_detected",
-    address: addr,
-    position: { x: detection.rect.left, y: detection.rect.bottom },
-    url: location.href,
-  }).catch(() => {/* native bridge not running — fine */});
+  const wallet: WalletState = await sendBg<WalletState>({ type: "get_wallet" }).catch(() => ({
+    address: null, adapter: null, connected: false,
+  }));
+
+  const { x, y } = clampPosition(rawX, rawY);
+
+  const controller = createPopup({
+    address,
+    x,
+    y,
+    callbacks: {
+      onDismiss: () => { activeController = null; },
+      onSwapClick: async () => {
+        let w = wallet;
+        if (!w.connected) {
+          try {
+            w = await connectWallet();
+          } catch {
+            controller.showError("No wallet found. Install Phantom or Backpack.");
+            return;
+          }
+        }
+        const panel = buildSwapPanel(address, w, {
+          onSuccess: (sig) => {
+            controller.showError(`✓ Swapped! ${sig.slice(0, 8)}…`);
+          },
+          onError: (msg) => controller.showError(msg),
+          onCancel: () => removePopup(),
+        });
+        controller.mountSwapPanel(panel);
+      },
+      onConnectWallet: async () => {
+        try {
+          const w = await connectWallet();
+          controller.showToken(tokenData.safety, tokenData.price, w);
+        } catch {
+          controller.showError("No wallet found.");
+        }
+      },
+    },
+  });
+
+  activeController = controller;
+
+  controller.showToken(tokenData.safety, tokenData.price, wallet);
+
+  streamNarration(
+    address,
+    tokenData.safety,
+    tokenData.price,
+    (delta) => controller.appendNarration(delta),
+  ).catch(() => {
+    controller.appendNarration(" (narration unavailable)");
+  });
 }
 
-interface JupiterScore {
-  score: number;
-  summary: string;
+// ── Selection detection ────────────────────────────────────────────────────────
+let debounce: ReturnType<typeof setTimeout> | null = null;
+const DEBOUNCE_MS = 350;
+
+function onSelectionChange(): void {
+  if (debounce) clearTimeout(debounce);
+  debounce = setTimeout(() => {
+    const detection = detectInSelection();
+    if (!detection || detection.type !== "address") return;
+    const rect = detection.rect;
+    triggerAddress(detection.value, rect.left + window.scrollX, rect.bottom + window.scrollY);
+  }, DEBOUNCE_MS);
 }
 
-async function fetchJupiterScore(mint: string): Promise<JupiterScore> {
-  const resp = await fetch(
-    `https://lite-api.jup.ag/tokens/v2/search?query=${encodeURIComponent(mint)}`
-  );
-  if (!resp.ok) throw new Error("Jupiter API error");
+document.addEventListener("mouseup", onSelectionChange);
+document.addEventListener("keyup", (e) => { if (e.shiftKey) onSelectionChange(); });
 
-  const results = await resp.json() as any[];
-  const t = results[0];
-  if (!t) throw new Error("Token not found");
+// ── Dismiss ────────────────────────────────────────────────────────────────────
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") { removePopup(); activeController = null; } });
+document.addEventListener("mousedown", (e) => {
+  const host = document.getElementById("quickdraw-host");
+  if (host && !host.contains(e.target as Node)) { removePopup(); activeController = null; }
+});
 
-  const score    = Math.round((t.organicScore ?? 0) as number);
-  const verified = t.isVerified ?? false;
-  const organic  = (t.organicScoreLabel ?? "unknown") as string;
-  const audit    = t.audit ?? {};
-  const isSus    = audit.isSus ?? false;
-
-  let summary = "";
-  if (isSus) {
-    summary = "⚠️ Flagged as suspicious by Jupiter.";
-  } else {
-    const parts: string[] = [];
-    if (verified)                     parts.push("Jupiter verified");
-    if (audit.mintAuthorityDisabled)  parts.push("mint auth disabled");
-    if (audit.freezeAuthorityDisabled) parts.push("freeze auth disabled");
-    if (organic === "high")           parts.push("high organic activity");
-    summary = parts.length
-      ? `✓ ${parts.join(" · ")}`
-      : "Unverified token — not on Jupiter strict list.";
+// ── MutationObserver ───────────────────────────────────────────────────────────
+const observer = new MutationObserver((mutations) => {
+  if (!detectionEnabled) return;
+  for (const mutation of mutations) {
+    for (const node of mutation.addedNodes) {
+      if (node.nodeType !== Node.TEXT_NODE) continue;
+      const text = (node as Text).textContent ?? "";
+      if (text.length < 32) continue;
+      const detections = detectInText(text);
+      if (!detections.length) continue;
+      const parent = node.parentElement;
+      const rect = parent?.getBoundingClientRect();
+      if (!rect) continue;
+      const first = detections[0];
+      if (first.type === "address") {
+        triggerAddress(first.value, rect.left, rect.bottom);
+        break;
+      }
+    }
   }
+});
 
-  return { score, summary };
-}
+observer.observe(document.body, { childList: true, subtree: true });
+
+injectWalletBridge().catch(() => {});
+
+sendBg<boolean>({ type: "get_detection_enabled" })
+  .then((enabled) => { detectionEnabled = enabled; })
+  .catch(() => {});
