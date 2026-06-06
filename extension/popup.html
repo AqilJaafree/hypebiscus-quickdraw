@@ -5,42 +5,39 @@
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
-      width: 220px;
+      width: 240px;
       background: #181818;
-      font-family: monospace;
+      font-family: 'Space Mono', monospace;
       color: #F5F0E8;
-      padding: 14px;
+      padding: 16px;
     }
-    .logo {
-      color: #F5E642;
-      font-size: 11px;
-      font-weight: 700;
-      letter-spacing: 1px;
-      margin-bottom: 8px;
+    .logo { color: #F5E642; font-size: 11px; font-weight: 700; letter-spacing: 1px; margin-bottom: 12px; }
+    .row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+    .label { color: #555; font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; }
+    #wallet-status { font-size: 11px; font-weight: 700; }
+    .toggle-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+    input[type=checkbox] { width: 16px; height: 16px; cursor: pointer; accent-color: #F5E642; }
+    button {
+      width: 100%; padding: 8px; font-size: 10px; font-weight: 700; letter-spacing: 0.06em;
+      background: #F5E642; color: #000; border: 1.5px solid #000;
+      box-shadow: 2px 2px 0 #000; cursor: pointer; font-family: inherit;
     }
-    .status {
-      color: #888;
-      font-size: 11px;
-      line-height: 1.5;
-    }
-    .status b { color: #8BF542; }
-    .tip {
-      margin-top: 10px;
-      padding-top: 10px;
-      border-top: 1px solid #333;
-      color: #555;
-      font-size: 10px;
-    }
+    button:hover { background: #ffe000; }
+    .sep { border-top: 1px solid #222; margin: 12px 0; }
   </style>
 </head>
 <body>
   <div class="logo">⚡ QUICKDRAW</div>
-  <div class="status">
-    <b>Active</b> — watching for token addresses.<br><br>
-    Highlight any Solana address on any page to see the organic score.
+  <div class="row">
+    <span class="label">Wallet</span>
+    <span id="wallet-status">Loading…</span>
   </div>
-  <div class="tip">
-    Works on Twitter/X, Telegram Web, DexScreener, pump.fun, and anywhere else.
+  <div class="sep"></div>
+  <div class="toggle-row">
+    <span class="label">Detection active</span>
+    <input type="checkbox" id="detection-toggle" checked />
   </div>
+  <button id="connect-btn">Connect Wallet</button>
+  <script src="dist/popup.js"></script>
 </body>
 </html>
