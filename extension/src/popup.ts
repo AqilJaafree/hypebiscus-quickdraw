@@ -1,14 +1,5 @@
-import type { BgRequest, BgResponse, WalletState } from "./types";
-
-function sendBg<T>(msg: BgRequest): Promise<T> {
-  return new Promise((resolve, reject) => {
-    chrome.runtime.sendMessage(msg, (resp: BgResponse<T>) => {
-      if (chrome.runtime.lastError) { reject(new Error(chrome.runtime.lastError.message)); return; }
-      if (resp.ok) resolve(resp.data);
-      else reject(new Error(resp.error));
-    });
-  });
-}
+import type { WalletState } from "./types";
+import { sendBg } from "./shared";
 
 async function init(): Promise<void> {
   const [wallet, enabled] = await Promise.all([

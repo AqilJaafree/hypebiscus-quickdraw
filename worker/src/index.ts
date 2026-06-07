@@ -91,7 +91,7 @@ async function checkRateLimit(ip: string, kv: KVNamespace): Promise<boolean> {
 const cors = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type, X-Quickdraw-Timestamp, X-Quickdraw-Sig",
+  "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Quickdraw-Client, X-Quickdraw-Timestamp, X-Quickdraw-Sig",
 };
 
 function json(data: unknown, status = 200): Response {

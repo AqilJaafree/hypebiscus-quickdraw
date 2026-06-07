@@ -3,18 +3,8 @@ import { createPopup, removePopup, PopupController } from "./popup-ui";
 import { buildSwapPanel } from "./swap-panel";
 import { getWallet, connectWallet, injectWalletBridge } from "./wallet";
 import { streamNarration } from "./worker-client";
-import type { BgRequest, BgResponse, TokenData, WalletState } from "./types";
-
-// ── Helpers ────────────────────────────────────────────────────────────────────
-function sendBg<T>(msg: BgRequest): Promise<T> {
-  return new Promise((resolve, reject) => {
-    chrome.runtime.sendMessage(msg, (resp: BgResponse<T>) => {
-      if (chrome.runtime.lastError) { reject(new Error(chrome.runtime.lastError.message)); return; }
-      if (resp.ok) resolve(resp.data);
-      else reject(new Error(resp.error));
-    });
-  });
-}
+import { sendBg } from "./shared";
+import type { TokenData, WalletState } from "./types";
 
 function clampPosition(x: number, y: number): { x: number; y: number } {
   const POP_W = 288, POP_H = 240;
@@ -124,8 +114,9 @@ function onSelectionChange(): void {
   }, DEBOUNCE_MS);
 }
 
-document.addEventListener("mouseup", onSelectionChange);
-document.addEventListener("keyup", (e) => { if (e.shiftKey) onSelectionChange(); });
+// Use capture:true so page-level stopPropagation can't block us
+document.addEventListener("mouseup", onSelectionChange, true);
+document.addEventListener("keyup", (e) => { if (e.shiftKey) onSelectionChange(); }, true);
 
 // ── Dismiss ────────────────────────────────────────────────────────────────────
 document.addEventListener("keydown", (e) => { if (e.key === "Escape") { removePopup(); activeController = null; } });

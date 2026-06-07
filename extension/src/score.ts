@@ -1,4 +1,5 @@
 import type { SafetyScore } from "./types";
+import { SCORE_THRESHOLDS, SCORE_COLORS } from "./shared";
 
 export interface JupiterTokenRaw {
   organicScore?: number;
@@ -11,15 +12,15 @@ export interface JupiterTokenRaw {
 }
 
 export function scoreLabel(score: number): "SAFE" | "CAUTION" | "HIGH RISK" {
-  if (score >= 80) return "SAFE";
-  if (score >= 50) return "CAUTION";
+  if (score >= SCORE_THRESHOLDS.SAFE) return "SAFE";
+  if (score >= SCORE_THRESHOLDS.CAUTION) return "CAUTION";
   return "HIGH RISK";
 }
 
 export function scoreColor(score: number): string {
-  if (score >= 80) return "#8BF542";
-  if (score >= 50) return "#F5C842";
-  return "#F54242";
+  if (score >= SCORE_THRESHOLDS.SAFE) return SCORE_COLORS.SAFE;
+  if (score >= SCORE_THRESHOLDS.CAUTION) return SCORE_COLORS.CAUTION;
+  return SCORE_COLORS.RISK;
 }
 
 export function computeSafetyScore(raw: JupiterTokenRaw): SafetyScore {
