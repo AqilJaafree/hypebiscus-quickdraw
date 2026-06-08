@@ -250,6 +250,52 @@ async function handleHeliusToken(url: URL, env: Env): Promise<Response> {
   return json(data, upstream.status);
 }
 
+async function handleAiDeepExtension(req: Request, env: Env): Promise<Response> {
+  const body = await req.json<{
+    mint: string;
+    ticker: string;
+    price: number;
+    safetyScore: number;
+    volume24h: number;
+  }>();
+
+  const systemPrompt =
+    "You are a DeFi analyst for Solana traders. Write 3-4 sentences analyzing the token's risk, momentum, and key on-chain signals. Be direct and data-driven. No disclaimers.";
+
+  const userContent = [
+    `Token: ${body.ticker} (${body.mint})`,
+    `Safety score: ${body.safetyScore}/100`,
+    `Price: $${body.price}`,
+    `24h volume: $${body.volume24h.toLocaleString()}`,
+  ].join("\n");
+
+  const upstream = await fetch(`${ANTHROPIC_BASE}/messages`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-api-key": env.ANTHROPIC_API_KEY,
+      "anthropic-version": "2023-06-01",
+    },
+    body: JSON.stringify({
+      model: "claude-sonnet-4-6",
+      max_tokens: 300,
+      system: systemPrompt,
+      messages: [{ role: "user", content: userContent }],
+      stream: true,
+    }),
+  });
+
+  return new Response(upstream.body, {
+    status: upstream.status,
+    headers: {
+      ...cors,
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      "X-Accel-Buffering": "no",
+    },
+  });
+}
+
 // ─────────────────────────── Reown auth page ─────────────────────────────────
 
 function authPage(callbackUrl: string, projectId: string): string {
@@ -366,7 +412,7 @@ export default {
       });
     }
 
-    // Extension bearer-token auth — covers /ai/fast only
+    // Extension bearer-token auth — covers /ai/fast and /ai/deep
     // The extension cannot sign HMAC (no shared secret in client code).
     // EXTENSION_SECRET is a separate Worker secret, not APP_SECRET.
     if (req.headers.get("X-Quickdraw-Client") === "extension") {
@@ -377,6 +423,9 @@ export default {
       }
       if (url.pathname === "/ai/fast" && req.method === "POST") {
         return handleAi(req, env, "claude-haiku-4-5-20251001");
+      }
+      if (url.pathname === "/ai/deep" && req.method === "POST") {
+        return handleAiDeepExtension(req, env);
       }
       return err("Not found", 404);
     }
