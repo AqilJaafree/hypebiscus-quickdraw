@@ -259,6 +259,10 @@ async function handleAiDeepExtension(req: Request, env: Env): Promise<Response> 
     volume24h: number;
   }>();
 
+  if (!body.mint || !body.ticker) {
+    return err("Missing required fields: mint, ticker", 400);
+  }
+
   const systemPrompt =
     "You are a DeFi analyst for Solana traders. Write 3-4 sentences analyzing the token's risk, momentum, and key on-chain signals. Be direct and data-driven. No disclaimers.";
 
@@ -284,6 +288,11 @@ async function handleAiDeepExtension(req: Request, env: Env): Promise<Response> 
       stream: true,
     }),
   });
+
+  if (!upstream.ok) {
+    const errorText = await upstream.text();
+    return err(`Anthropic error ${upstream.status}: ${errorText}`, upstream.status);
+  }
 
   return new Response(upstream.body, {
     status: upstream.status,
