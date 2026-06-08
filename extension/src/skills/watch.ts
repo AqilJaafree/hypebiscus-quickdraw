@@ -25,34 +25,13 @@ export function buildWatchPanel(
   const el = document.createElement("div");
   el.style.cssText = `padding:10px 12px;font-family:${DS.font};`;
 
-  async function handleAdd(): Promise<void> {
-    try {
-      const current = await sendBg<WatchItem[]>({ type: "get_watchlist" });
-      const updated = watchlistAdd(current, { mint, ticker });
-      await sendBg({ type: "set_watchlist", watchlist: updated });
-      onUpdated(updated);
-    } catch {
-      // silently ignore — state will reflect reality on next open
-    }
-    render(watchlistContains(watchlistPrices.map(p => ({ mint: p.mint, ticker: p.ticker })), mint)
-      ? watchlistPrices.map(p => p.mint) : [mint, ...watchlistPrices.map(p => p.mint)]);
-  }
+  // Local mutable state — updated as user interacts
+  let currentMints = watchlist.map(w => w.mint);
+  let currentPrices = [...watchlistPrices];
 
-  async function handleRemove(removeMint: string): Promise<void> {
-    try {
-      const current = await sendBg<WatchItem[]>({ type: "get_watchlist" });
-      const updated = watchlistRemove(current, removeMint);
-      await sendBg({ type: "set_watchlist", watchlist: updated });
-      onUpdated(updated);
-    } catch {
-      // silently ignore
-    }
-    render(watchlistPrices.filter(p => p.mint !== removeMint).map(p => p.mint));
-  }
-
-  function render(watchedMints: string[]): void {
-    const isWatching = watchedMints.includes(mint);
-    el.innerHTML = buildWatchHTML(mint, ticker, isWatching, watchlistPrices);
+  function render(): void {
+    const isWatching = currentMints.includes(mint);
+    el.innerHTML = buildWatchHTML(mint, ticker, isWatching, currentPrices);
 
     if (isWatching) {
       el.querySelector("#qd-watch-remove")?.addEventListener("click", () => handleRemove(mint));
@@ -60,13 +39,40 @@ export function buildWatchPanel(
       el.querySelector("#qd-watch-add")?.addEventListener("click", () => handleAdd());
     }
 
-    watchlistPrices.forEach(item => {
+    currentPrices.forEach(item => {
       const key = item.mint.slice(0, 8);
       el.querySelector(`#qd-watch-del-${key}`)?.addEventListener("click", () => handleRemove(item.mint));
     });
   }
 
-  render(watchlist.map(w => w.mint));
+  async function handleAdd(): Promise<void> {
+    try {
+      const current = await sendBg<WatchItem[]>({ type: "get_watchlist" });
+      const updated = watchlistAdd(current, { mint, ticker });
+      await sendBg({ type: "set_watchlist", watchlist: updated });
+      currentMints = updated.map(w => w.mint);
+      onUpdated(updated);
+    } catch {
+      // silently ignore — state will self-correct on next open
+    }
+    render();
+  }
+
+  async function handleRemove(removeMint: string): Promise<void> {
+    try {
+      const current = await sendBg<WatchItem[]>({ type: "get_watchlist" });
+      const updated = watchlistRemove(current, removeMint);
+      await sendBg({ type: "set_watchlist", watchlist: updated });
+      currentMints = updated.map(w => w.mint);
+      currentPrices = currentPrices.filter(p => p.mint !== removeMint);
+      onUpdated(updated);
+    } catch {
+      // silently ignore
+    }
+    render();
+  }
+
+  render();
   return el;
 }
 
