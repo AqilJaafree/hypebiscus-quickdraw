@@ -1,43 +1,94 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-  <meta charset="utf-8">
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Quickdraw</title>
   <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    body {
-      width: 240px;
-      background: #181818;
-      font-family: 'Space Mono', monospace;
-      color: #F5F0E8;
-      padding: 16px;
-    }
-    .logo { color: #F5E642; font-size: 11px; font-weight: 700; letter-spacing: 1px; margin-bottom: 12px; }
-    .row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
-    .label { color: #555; font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; }
-    #wallet-status { font-size: 11px; font-weight: 700; }
-    .toggle-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
-    input[type=checkbox] { width: 16px; height: 16px; cursor: pointer; accent-color: #F5E642; }
-    button {
-      width: 100%; padding: 8px; font-size: 10px; font-weight: 700; letter-spacing: 0.06em;
-      background: #F5E642; color: #000; border: 1.5px solid #000;
-      box-shadow: 2px 2px 0 #000; cursor: pointer; font-family: inherit;
-    }
-    button:hover { background: #ffe000; }
-    .sep { border-top: 1px solid #222; margin: 12px 0; }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { width: 280px; background: #181818; font-family: 'Space Mono', monospace; color: #fff; font-size: 12px; }
+    .qd-tabs { display: flex; border-bottom: 1px solid #1e1e1e; }
+    .qd-tab-btn { flex: 1; padding: 10px 0; font-size: 10px; font-weight: 700; letter-spacing: 0.06em;
+      cursor: pointer; border: none; background: #181818; color: #555; font-family: inherit;
+      border-bottom: 2px solid transparent; }
+    .qd-tab-btn.active { color: #f5e642; border-bottom: 2px solid #f5e642; }
+    .qd-pane { display: none; padding: 12px; }
+    .qd-pane.active { display: block; }
+    .qd-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+    .qd-label { font-size: 10px; color: #888; letter-spacing: 0.06em; }
+    .qd-val { font-size: 11px; color: #fff; }
+    .qd-btn { width: 100%; background: #f5e642; color: #000; border: 2px solid #000;
+      box-shadow: 2px 2px 0 #333; padding: 8px; font-size: 11px; font-weight: 700;
+      letter-spacing: 0.06em; cursor: pointer; font-family: inherit; margin-bottom: 8px; border-radius: 0; }
+    .qd-btn.sec { background: #222; color: #888; border: 1px solid #333; box-shadow: none; }
+    .qd-toggle { appearance: none; width: 32px; height: 18px; background: #333; border: none;
+      border-radius: 9px; cursor: pointer; position: relative; transition: background 0.15s; }
+    .qd-toggle:checked { background: #f5e642; }
+    .qd-skill-row { display: flex; align-items: center; justify-content: space-between;
+      padding: 8px 0; border-bottom: 1px solid #1e1e1e; }
+    .qd-skill-info { flex: 1; }
+    .qd-skill-name { font-size: 11px; font-weight: 700; color: #fff; letter-spacing: 0.04em; }
+    .qd-skill-desc { font-size: 9px; color: #555; margin-top: 2px; }
+    #wallet-status { font-size: 11px; }
+    .qd-sep { border: none; border-top: 1px solid #1e1e1e; margin: 10px 0; }
   </style>
 </head>
 <body>
-  <div class="logo">⚡ QUICKDRAW</div>
-  <div class="row">
-    <span class="label">Wallet</span>
-    <span id="wallet-status">Loading…</span>
+  <div class="qd-tabs">
+    <button class="qd-tab-btn active" id="tab-state">STATE</button>
+    <button class="qd-tab-btn" id="tab-skills">SKILLS</button>
   </div>
-  <div class="sep"></div>
-  <div class="toggle-row">
-    <span class="label">Detection active</span>
-    <input type="checkbox" id="detection-toggle" checked />
+
+  <div class="qd-pane active" id="pane-state">
+    <div class="qd-row">
+      <span class="qd-label">DETECTION</span>
+      <input type="checkbox" class="qd-toggle" id="detection-toggle" checked />
+    </div>
+    <hr class="qd-sep" />
+    <div class="qd-row">
+      <span class="qd-label">WALLET</span>
+      <span id="wallet-status">Not connected</span>
+    </div>
+    <button class="qd-btn" id="connect-btn">CONNECT WALLET</button>
+    <hr class="qd-sep" />
+    <div class="qd-label" style="margin-bottom:6px;">WATCHLIST</div>
+    <div id="watchlist-summary" style="font-size:10px;color:#555;">Loading…</div>
   </div>
-  <button id="connect-btn">Connect Wallet</button>
+
+  <div class="qd-pane" id="pane-skills">
+    <div class="qd-skill-row">
+      <div class="qd-skill-info">
+        <div class="qd-skill-name">TRADE</div>
+        <div class="qd-skill-desc">Jupiter swap inline</div>
+      </div>
+      <input type="checkbox" class="qd-toggle" id="skill-trade" checked />
+    </div>
+    <div class="qd-skill-row">
+      <div class="qd-skill-info">
+        <div class="qd-skill-name">ALERT</div>
+        <div class="qd-skill-desc">Price notifications</div>
+      </div>
+      <input type="checkbox" class="qd-toggle" id="skill-alert" checked />
+    </div>
+    <div class="qd-skill-row">
+      <div class="qd-skill-info">
+        <div class="qd-skill-name">WATCH</div>
+        <div class="qd-skill-desc">Track tokens</div>
+      </div>
+      <input type="checkbox" class="qd-toggle" id="skill-watch" checked />
+    </div>
+    <div class="qd-skill-row">
+      <div class="qd-skill-info">
+        <div class="qd-skill-name">DEEP</div>
+        <div class="qd-skill-desc">AI deep analysis</div>
+      </div>
+      <input type="checkbox" class="qd-toggle" id="skill-deep" checked />
+    </div>
+    <div style="padding:10px 0;font-size:9px;color:#333;text-align:center;">
+      Skills appear in the popup when a token is detected on-page.
+    </div>
+  </div>
+
   <script src="dist/popup.js"></script>
 </body>
 </html>
