@@ -1,16 +1,33 @@
 import { fetchToken } from "./jupiter-client";
-import type { BgRequest, BgResponse, SafetyScore, TokenData, TokenPrice, WalletState } from "./types";
+import { alertShouldFire, alertShouldRearm } from "./skills/alert";
+import type {
+  BgRequest, BgResponse, SafetyScore, TokenData, TokenPrice,
+  WalletState, PriceAlert, WatchItem, WatchItemWithPrice, SkillSettings,
+  DeepPortRequest, DeepPortMessage,
+} from "./types";
+import { DEFAULT_SKILL_SETTINGS } from "./types";
+
+declare const __WORKER_URL__: string;
+declare const __EXTENSION_SECRET__: string;
+
+const WORKER_URL = typeof __WORKER_URL__ !== "undefined"
+  ? __WORKER_URL__
+  : "http://localhost:8787";
+
+const EXTENSION_SECRET = typeof __EXTENSION_SECRET__ !== "undefined"
+  ? __EXTENSION_SECRET__
+  : "dev-extension-secret-change-in-prod";
 
 // ── Cache ──────────────────────────────────────────────────────────────────────
 interface CacheEntry<T> { data: T; expiresAt: number; }
 
 const safetyCache = new Map<string, CacheEntry<SafetyScore>>();
 const priceCache  = new Map<string, CacheEntry<TokenPrice | null>>();
-const dedupMap    = new Map<string, number>(); // address → last triggered timestamp
+const dedupMap    = new Map<string, number>();
 
-const SAFETY_TTL_MS = 300_000; // 5 min
-const PRICE_TTL_MS  =  15_000; // 15 sec
-const DEDUP_MS      =  30_000; // 30 sec
+const SAFETY_TTL_MS = 300_000;
+const PRICE_TTL_MS  =  15_000;
+const DEDUP_MS      =  30_000;
 
 function isFresh<T>(entry: CacheEntry<T> | undefined): entry is CacheEntry<T> {
   return !!entry && Date.now() < entry.expiresAt;
@@ -44,25 +61,171 @@ async function getTokenData(address: string): Promise<TokenData> {
   };
 }
 
+// ── Jupiter quote via worker ───────────────────────────────────────────────────
+async function fetchQuoteFromWorker(
+  inputMint: string,
+  outputMint: string,
+  amountLamports: number,
+): Promise<unknown> {
+  const params = new URLSearchParams({
+    inputMint,
+    outputMint,
+    amount: String(amountLamports),
+    slippageBps: "50",
+  });
+  const resp = await fetch(`${WORKER_URL}/defi/jupiter/quote?${params}`, {
+    headers: {
+      "X-Quickdraw-Client": "extension",
+      "Authorization": `Bearer ${EXTENSION_SECRET}`,
+    },
+  });
+  if (!resp.ok) throw new Error("Quote failed");
+  return resp.json();
+}
+
+async function buildSwapTxFromWorker(
+  inputMint: string,
+  outputMint: string,
+  amountLamports: number,
+  walletAddress: string,
+): Promise<string> {
+  const quote = await fetchQuoteFromWorker(inputMint, outputMint, amountLamports);
+  const resp = await fetch(`${WORKER_URL}/defi/jupiter/swap`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Quickdraw-Client": "extension",
+      "Authorization": `Bearer ${EXTENSION_SECRET}`,
+    },
+    body: JSON.stringify({ quoteResponse: quote, userPublicKey: walletAddress }),
+  });
+  if (!resp.ok) throw new Error("Swap build failed");
+  const data = await resp.json<{ swapTransaction: string }>();
+  return data.swapTransaction;
+}
+
+// ── Price alert polling ────────────────────────────────────────────────────────
+const ALERT_ALARM = "qd-alert-check";
+
+chrome.alarms.create(ALERT_ALARM, { periodInMinutes: 5 });
+
+chrome.alarms.onAlarm.addListener(async (alarm) => {
+  if (alarm.name !== ALERT_ALARM) return;
+
+  const { alerts } = await chrome.storage.local.get("alerts");
+  const alertList: PriceAlert[] = alerts ?? [];
+  if (!alertList.length) return;
+
+  const mints = [...new Set(alertList.map(a => a.mint))];
+  let updated = [...alertList];
+  let anyChanged = false;
+
+  for (const mint of mints) {
+    try {
+      const params = new URLSearchParams({ ids: mint });
+      const resp = await fetch(`${WORKER_URL}/defi/jupiter/price?${params}`);
+      if (!resp.ok) continue;
+      const data = await resp.json<{ data: Record<string, { price: number }> }>();
+      const currentPrice = data.data[mint]?.price;
+      if (currentPrice === undefined) continue;
+
+      updated = updated.map(a => {
+        if (a.mint !== mint) return a;
+        if (alertShouldFire(a, currentPrice)) {
+          chrome.notifications.create(`qd-alert-${a.mint}-${a.condition}`, {
+            type: "basic",
+            iconUrl: "icon.png",
+            title: "Quickdraw Alert",
+            message: `${a.ticker} is ${a.condition === "ABOVE" ? "above" : "below"} $${a.price} (now $${currentPrice.toFixed(6)})`,
+          });
+          anyChanged = true;
+          return { ...a, triggered: true };
+        }
+        if (alertShouldRearm(a, currentPrice)) {
+          anyChanged = true;
+          return { ...a, triggered: false };
+        }
+        return a;
+      });
+    } catch { /* network error — skip this mint */ }
+  }
+
+  if (anyChanged) {
+    await chrome.storage.local.set({ alerts: updated });
+  }
+});
+
+// ── Deep analysis port ─────────────────────────────────────────────────────────
+chrome.runtime.onConnect.addListener((port) => {
+  if (port.name !== "deep-analysis") return;
+
+  port.onMessage.addListener(async (req: DeepPortRequest) => {
+    try {
+      const resp = await fetch(`${WORKER_URL}/ai/deep`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Quickdraw-Client": "extension",
+          "Authorization": `Bearer ${EXTENSION_SECRET}`,
+        },
+        body: JSON.stringify(req),
+      });
+
+      if (!resp.ok || !resp.body) {
+        port.postMessage({ type: "error", message: "Analysis unavailable" } satisfies DeepPortMessage);
+        return;
+      }
+
+      const reader = resp.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() ?? "";
+        for (const line of lines) {
+          if (!line.startsWith("data: ")) continue;
+          const payload = line.slice(6).trim();
+          if (payload === "[DONE]") continue;
+          try {
+            const event = JSON.parse(payload) as {
+              type: string;
+              delta?: { type: string; text?: string };
+            };
+            if (event.type === "content_block_delta" && event.delta?.text) {
+              port.postMessage({ type: "chunk", text: event.delta.text } satisfies DeepPortMessage);
+            }
+          } catch { /* malformed SSE line */ }
+        }
+      }
+      port.postMessage({ type: "done" } satisfies DeepPortMessage);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Analysis failed";
+      port.postMessage({ type: "error", message: msg } satisfies DeepPortMessage);
+    }
+  });
+});
+
 // ── Message handler ────────────────────────────────────────────────────────────
 chrome.runtime.onMessage.addListener(
   (msg: BgRequest, _sender, sendResponse: (r: BgResponse) => void) => {
     handleMessage(msg, sendResponse);
-    return true; // keep channel open for async response
+    return true;
   },
 );
 
 async function handleMessage(msg: BgRequest, respond: (r: BgResponse) => void): Promise<void> {
   try {
     if (msg.type === "fetch_token") {
-      // Dedup check
       const last = dedupMap.get(msg.address);
       if (last && Date.now() - last < DEDUP_MS) {
         respond({ ok: false, error: "dedup" });
         return;
       }
       dedupMap.set(msg.address, Date.now());
-
       const data = await getTokenData(msg.address);
       respond({ ok: true, data });
       return;
@@ -82,13 +245,79 @@ async function handleMessage(msg: BgRequest, respond: (r: BgResponse) => void): 
 
     if (msg.type === "get_detection_enabled") {
       const { detectionEnabled } = await chrome.storage.local.get("detectionEnabled");
-      respond({ ok: true, data: detectionEnabled !== false }); // default true
+      respond({ ok: true, data: detectionEnabled !== false });
       return;
     }
 
     if (msg.type === "set_detection_enabled") {
       await chrome.storage.local.set({ detectionEnabled: msg.enabled });
       respond({ ok: true, data: null });
+      return;
+    }
+
+    if (msg.type === "get_alerts") {
+      const { alerts } = await chrome.storage.local.get("alerts");
+      respond({ ok: true, data: (alerts ?? []) as PriceAlert[] });
+      return;
+    }
+
+    if (msg.type === "set_alerts") {
+      await chrome.storage.local.set({ alerts: msg.alerts });
+      respond({ ok: true, data: null });
+      return;
+    }
+
+    if (msg.type === "get_watchlist") {
+      const { watchlist } = await chrome.storage.local.get("watchlist");
+      respond({ ok: true, data: (watchlist ?? []) as WatchItem[] });
+      return;
+    }
+
+    if (msg.type === "set_watchlist") {
+      await chrome.storage.local.set({ watchlist: msg.watchlist });
+      respond({ ok: true, data: null });
+      return;
+    }
+
+    if (msg.type === "get_watchlist_prices") {
+      const ids = msg.mints.join(",");
+      const resp = await fetch(`${WORKER_URL}/defi/jupiter/price?ids=${ids}`);
+      if (!resp.ok) {
+        respond({ ok: false, error: "Price fetch failed" });
+        return;
+      }
+      const data = await resp.json<{ data: Record<string, { price: number }> }>();
+      const result: WatchItemWithPrice[] = msg.mints.map(mint => ({
+        mint,
+        ticker: "",
+        priceUsd: data.data[mint]?.price ?? null,
+        change24h: null,
+      }));
+      respond({ ok: true, data: result });
+      return;
+    }
+
+    if (msg.type === "get_skill_settings") {
+      const { skillSettings } = await chrome.storage.local.get("skillSettings");
+      respond({ ok: true, data: (skillSettings ?? DEFAULT_SKILL_SETTINGS) as SkillSettings });
+      return;
+    }
+
+    if (msg.type === "set_skill_settings") {
+      await chrome.storage.local.set({ skillSettings: msg.settings });
+      respond({ ok: true, data: null });
+      return;
+    }
+
+    if (msg.type === "quote") {
+      const quote = await fetchQuoteFromWorker(msg.inputMint, msg.outputMint, msg.amountLamports);
+      respond({ ok: true, data: quote });
+      return;
+    }
+
+    if (msg.type === "swap_tx") {
+      const txBase64 = await buildSwapTxFromWorker(msg.inputMint, msg.outputMint, msg.amountLamports, msg.walletAddress);
+      respond({ ok: true, data: txBase64 });
       return;
     }
 
