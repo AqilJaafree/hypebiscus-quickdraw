@@ -1,13 +1,19 @@
 import { detectInSelection, detectInText } from "./detector";
 import { createPopup, removePopup, PopupController } from "./popup-ui";
-import { buildSwapPanel } from "./swap-panel";
-import { getWallet, connectWallet, injectWalletBridge } from "./wallet";
-import { streamNarration } from "./worker-client";
+import type { SkillTab } from "./popup-ui";
+import { buildTradePanel } from "./skills/trade";
+import { buildAlertPanel } from "./skills/alert";
+import { buildWatchPanel } from "./skills/watch";
+import { buildDeepPanel } from "./skills/deep";
 import { sendBg } from "./shared";
-import type { TokenData, WalletState } from "./types";
+import type {
+  TokenData, WalletState, PriceAlert, WatchItem,
+  WatchItemWithPrice, SkillSettings,
+} from "./types";
+import { DEFAULT_SKILL_SETTINGS } from "./types";
 
 function clampPosition(x: number, y: number): { x: number; y: number } {
-  const POP_W = 288, POP_H = 240;
+  const POP_W = 296, POP_H = 260;
   const cx = x + POP_W > window.innerWidth  ? x - POP_W - 8 : x + 16;
   const cy = y + POP_H > window.innerHeight ? y - POP_H - 8 : y + 8;
   return { x: Math.max(8, cx), y: Math.max(8, cy) };
@@ -22,65 +28,80 @@ async function triggerAddress(address: string, rawX: number, rawY: number): Prom
 
   const { x, y } = clampPosition(rawX, rawY);
 
-  // Show loading popup immediately — user sees feedback right away
   let walletState: WalletState = { address: null, adapter: null, connected: false };
   let tokenData: TokenData | null = null;
+  let alertList: PriceAlert[] = [];
+  let watchlist: WatchItem[] = [];
+  let watchlistPrices: WatchItemWithPrice[] = [];
+  let skillSettings: SkillSettings = DEFAULT_SKILL_SETTINGS;
 
   const controller = createPopup({
     address,
     x,
     y,
+    skillSettings,
     callbacks: {
       onDismiss: () => { activeController = null; },
-      onSwapClick: async () => {
-        let w = walletState;
-        if (!w.connected) {
-          try {
-            await injectWalletBridge();
-            w = await connectWallet();
-            walletState = w;
-          } catch {
-            controller.showError("No wallet found. Install Phantom or Backpack.");
-            return;
-          }
-        } else {
-          await injectWalletBridge();
-        }
-        const panel = buildSwapPanel(address, w, {
-          onSuccess: (sig) => {
-            controller.showError(`✓ Swapped! ${sig.slice(0, 8)}…`);
-          },
-          onError: (msg) => controller.showError(msg),
-          onCancel: () => removePopup(),
-        });
-        controller.mountSwapPanel(panel);
+      onGear: () => {
+        chrome.runtime.sendMessage({ type: "OPEN_POPUP" }).catch(() => {});
       },
-      onConnectWallet: async () => {
-        try {
-          const w = await connectWallet();
-          walletState = w;
-          if (tokenData) controller.showToken(tokenData.safety, tokenData.price, w);
-        } catch {
-          controller.showError("No wallet found.");
+      onSkillTab: (tab: SkillTab) => {
+        if (!tokenData) return;
+        const ticker = tokenData.price?.symbol ?? address.slice(0, 6);
+        const price = tokenData.price?.usd ?? 0;
+        const vol = (tokenData.price as (typeof tokenData.price & { volume24h?: number }) | null)?.volume24h ?? 0;
+        const safety = tokenData.safety.score;
+
+        let panelEl: HTMLElement;
+        switch (tab) {
+          case "TRADE":
+            panelEl = buildTradePanel(address, ticker, walletState);
+            break;
+          case "ALERT":
+            panelEl = buildAlertPanel(address, ticker, price, alertList, (updated) => { alertList = updated; });
+            break;
+          case "WATCH":
+            panelEl = buildWatchPanel(address, ticker, watchlist, watchlistPrices, (updated) => { watchlist = updated; });
+            break;
+          case "DEEP":
+            panelEl = buildDeepPanel(address, ticker, price, safety, vol);
+            break;
         }
+        controller.activateSkill(tab);
+        controller.mountPanel(panelEl);
       },
     },
   });
 
   activeController = controller;
 
-  // Fetch wallet + token data in parallel
-  const [wallet, fetchResult] = await Promise.allSettled([
+  // Parallel fetch: wallet + token + alerts + watchlist + skill settings
+  const [wallet, fetchResult, alertResult, watchResult, skillResult] = await Promise.allSettled([
     sendBg<WalletState>({ type: "get_wallet" }),
     sendBg<TokenData>({ type: "fetch_token", address }),
+    sendBg<PriceAlert[]>({ type: "get_alerts" }),
+    sendBg<WatchItem[]>({ type: "get_watchlist" }),
+    sendBg<SkillSettings>({ type: "get_skill_settings" }),
   ]);
 
   if (wallet.status === "fulfilled") walletState = wallet.value;
+  if (alertResult.status === "fulfilled") alertList = alertResult.value;
+  if (watchResult.status === "fulfilled") {
+    watchlist = watchResult.value;
+    if (watchlist.length > 0) {
+      const mints = watchlist.map(w => w.mint);
+      const priceResult = await sendBg<WatchItemWithPrice[]>({
+        type: "get_watchlist_prices",
+        mints,
+      }).catch(() => [] as WatchItemWithPrice[]);
+      watchlistPrices = priceResult.map((p, i) => ({ ...p, ticker: watchlist[i]?.ticker ?? "" }));
+    }
+  }
+  if (skillResult.status === "fulfilled") skillSettings = skillResult.value;
 
   if (fetchResult.status === "rejected") {
     const msg = fetchResult.reason instanceof Error ? fetchResult.reason.message : "";
     if (msg === "dedup") {
-      // Already shown recently — close silently
       removePopup(); activeController = null; return;
     }
     controller.showError(msg || "Token not found on Jupiter");
@@ -88,16 +109,7 @@ async function triggerAddress(address: string, rawX: number, rawY: number): Prom
   }
 
   tokenData = fetchResult.value;
-  controller.showToken(tokenData.safety, tokenData.price, walletState);
-
-  streamNarration(
-    address,
-    tokenData.safety,
-    tokenData.price,
-    (delta) => controller.appendNarration(delta),
-  ).catch(() => {
-    controller.appendNarration(" (narration unavailable)");
-  });
+  controller.showToken(tokenData.safety, tokenData.price);
 }
 
 // ── Selection detection ────────────────────────────────────────────────────────
@@ -114,20 +126,25 @@ function onSelectionChange(): void {
   }, DEBOUNCE_MS);
 }
 
-// Use capture:true so page-level stopPropagation can't block us
 document.addEventListener("mouseup", onSelectionChange, true);
 document.addEventListener("keyup", (e) => { if (e.shiftKey) onSelectionChange(); }, true);
 
-// ── Dismiss ────────────────────────────────────────────────────────────────────
-document.addEventListener("keydown", (e) => { if (e.key === "Escape") { removePopup(); activeController = null; } });
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") { removePopup(); activeController = null; }
+});
 document.addEventListener("mousedown", (e) => {
   const host = document.getElementById("quickdraw-host");
   if (host && !host.contains(e.target as Node)) { removePopup(); activeController = null; }
 });
 
+// ── Wallet update listener ────────────────────────────────────────────────────
+chrome.runtime.onMessage.addListener((msg: { type: string; wallet?: WalletState }) => {
+  if (msg.type === "WALLET_UPDATED" && msg.wallet && activeController) {
+    activeController.updateWallet(msg.wallet);
+  }
+});
+
 // ── MutationObserver ───────────────────────────────────────────────────────────
-// Batched: collect mutations for 500ms then process once to avoid flooding on
-// address-heavy pages like Solscan, Jupiter, and Meteora.
 let mutationQueue: MutationRecord[] = [];
 let mutationTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -136,7 +153,7 @@ function processMutations(): void {
   const batch = mutationQueue;
   mutationQueue = [];
   for (const mutation of batch) {
-    for (const node of mutation.addedNodes) {
+    for (const node of Array.from(mutation.addedNodes)) {
       if (node.nodeType !== Node.TEXT_NODE) continue;
       const text = (node as Text).textContent ?? "";
       if (text.length < 32) continue;
@@ -148,7 +165,7 @@ function processMutations(): void {
       const first = detections[0];
       if (first.type === "address") {
         triggerAddress(first.value, rect.left, rect.bottom);
-        return; // one trigger per batch — avoid flooding
+        return;
       }
     }
   }
