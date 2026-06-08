@@ -104,15 +104,15 @@ export type BgRequest =
   | { type: "set_wallet"; wallet: WalletState }
   | { type: "get_detection_enabled" }
   | { type: "set_detection_enabled"; enabled: boolean }
-  | { type: "GET_ALERTS" }
-  | { type: "SET_ALERTS"; alerts: PriceAlert[] }
-  | { type: "GET_WATCHLIST" }
-  | { type: "SET_WATCHLIST"; watchlist: WatchItem[] }
-  | { type: "GET_WATCHLIST_PRICES"; mints: string[] }
-  | { type: "GET_SKILL_SETTINGS" }
-  | { type: "SET_SKILL_SETTINGS"; settings: SkillSettings }
-  | { type: "QUOTE"; inputMint: string; outputMint: string; amountLamports: number }
-  | { type: "SWAP_TX"; inputMint: string; outputMint: string; amountLamports: number; walletAddress: string };
+  | { type: "get_alerts" }
+  | { type: "set_alerts"; alerts: PriceAlert[] }
+  | { type: "get_watchlist" }
+  | { type: "set_watchlist"; watchlist: WatchItem[] }
+  | { type: "get_watchlist_prices"; mints: string[] }
+  | { type: "get_skill_settings" }
+  | { type: "set_skill_settings"; settings: SkillSettings }
+  | { type: "quote"; inputMint: string; outputMint: string; amountLamports: number }
+  | { type: "swap_tx"; inputMint: string; outputMint: string; amountLamports: number; walletAddress: string };
 
 export type BgResponse<T = unknown> =
   | { ok: true; data: T }

@@ -25,12 +25,12 @@ describe("DEFAULT_SKILL_SETTINGS", () => {
 });
 
 describe("BgRequest discriminated union", () => {
-  it("GET_ALERTS type narrows correctly", () => {
-    const req: BgRequest = { type: "GET_ALERTS" };
-    expect(req.type).toBe("GET_ALERTS");
+  it("get_alerts type narrows correctly", () => {
+    const req: BgRequest = { type: "get_alerts" };
+    expect(req.type).toBe("get_alerts");
   });
-  it("SET_ALERTS type narrows correctly", () => {
-    const req: BgRequest = { type: "SET_ALERTS", alerts: [] };
-    expect(req.type).toBe("SET_ALERTS");
+  it("set_alerts type narrows correctly", () => {
+    const req: BgRequest = { type: "set_alerts", alerts: [] };
+    expect(req.type).toBe("set_alerts");
   });
 });
