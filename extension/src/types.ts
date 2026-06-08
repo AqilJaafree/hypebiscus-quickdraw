@@ -40,6 +40,62 @@ export interface WalletState {
   connected: boolean;
 }
 
+export interface PriceAlert {
+  mint: string;
+  ticker: string;
+  condition: "ABOVE" | "BELOW";
+  price: number;
+  triggered: boolean;
+}
+
+export interface WatchItem {
+  mint: string;
+  ticker: string;
+}
+
+export interface WatchItemWithPrice extends WatchItem {
+  priceUsd: number | null;
+  change24h: number | null;
+}
+
+export interface SkillSettings {
+  trade: boolean;
+  alert: boolean;
+  watch: boolean;
+  deep: boolean;
+}
+
+export const DEFAULT_SKILL_SETTINGS: SkillSettings = {
+  trade: true,
+  alert: true,
+  watch: true,
+  deep: true,
+};
+
+export interface DeepPortRequest {
+  mint: string;
+  ticker: string;
+  price: number;
+  safetyScore: number;
+  volume24h: number;
+}
+
+export interface DeepPortChunk {
+  type: "chunk";
+  text: string;
+}
+
+export interface DeepPortDone {
+  type: "done";
+}
+
+export interface DeepPortError {
+  type: "error";
+  message: string;
+}
+
+export type DeepPortMessage = DeepPortChunk | DeepPortDone | DeepPortError;
+
 export type BgRequest =
   | { type: "fetch_token"; address: string }
   | { type: "get_quote"; inputMint: string; outputMint: string; amountLamports: number; slippageBps: number }
@@ -47,7 +103,16 @@ export type BgRequest =
   | { type: "get_wallet" }
   | { type: "set_wallet"; wallet: WalletState }
   | { type: "get_detection_enabled" }
-  | { type: "set_detection_enabled"; enabled: boolean };
+  | { type: "set_detection_enabled"; enabled: boolean }
+  | { type: "GET_ALERTS" }
+  | { type: "SET_ALERTS"; alerts: PriceAlert[] }
+  | { type: "GET_WATCHLIST" }
+  | { type: "SET_WATCHLIST"; watchlist: WatchItem[] }
+  | { type: "GET_WATCHLIST_PRICES"; mints: string[] }
+  | { type: "GET_SKILL_SETTINGS" }
+  | { type: "SET_SKILL_SETTINGS"; settings: SkillSettings }
+  | { type: "QUOTE"; inputMint: string; outputMint: string; amountLamports: number }
+  | { type: "SWAP_TX"; inputMint: string; outputMint: string; amountLamports: number; walletAddress: string };
 
 export type BgResponse<T = unknown> =
   | { ok: true; data: T }
