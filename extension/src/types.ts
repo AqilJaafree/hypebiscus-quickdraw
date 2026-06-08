@@ -13,6 +13,7 @@ export interface SafetyScore {
 export interface TokenPrice {
   usd: number;
   change24h: number;
+  volume24h: number;
   symbol: string;
   name: string;
 }

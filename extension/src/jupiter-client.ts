@@ -35,6 +35,7 @@ export async function fetchToken(
       ? {
           usd: token.usdPrice,
           change24h: token.stats24h?.priceChange ?? 0,
+          volume24h: 0,
           symbol: token.symbol,
           name: token.name,
         }
