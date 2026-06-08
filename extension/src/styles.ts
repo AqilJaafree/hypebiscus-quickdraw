@@ -12,7 +12,7 @@ export const DS = {
   textMut: "#888",
 } as const;
 
-export const brutal = (bg = DS.yellow): string =>
+export const brutal = (bg: string = DS.yellow): string =>
   `background:${bg};border:2px solid ${DS.stroke};box-shadow:${DS.shadow};border-radius:0`;
 
 export function safetyColor(score: number): string {
