@@ -47,22 +47,31 @@ export function buildAlertPanel(
     el.querySelector<HTMLButtonElement>("#qd-alert-set")?.addEventListener("click", async () => {
       const price = parseFloat(priceInput);
       if (isNaN(price) || price <= 0) return;
-      const existing = await sendBg<PriceAlert[]>({ type: "get_alerts" });
-      const filtered = existing.filter(a => !(a.mint === mint && a.condition === condition));
-      const updated: PriceAlert[] = [
-        ...filtered,
-        { mint, ticker, condition, price, triggered: false },
-      ];
-      await sendBg({ type: "set_alerts", alerts: updated });
-      onAlertSet(updated);
-      render();
-    });
-    existingAlerts.forEach((alert, i) => {
-      el.querySelector(`#qd-alert-del-${i}`)?.addEventListener("click", async () => {
+      try {
         const existing = await sendBg<PriceAlert[]>({ type: "get_alerts" });
-        const updated = existing.filter((_, idx) => idx !== i);
+        const filtered = existing.filter(a => !(a.mint === mint && a.condition === condition));
+        const updated: PriceAlert[] = [
+          ...filtered,
+          { mint, ticker, condition, price, triggered: false },
+        ];
         await sendBg({ type: "set_alerts", alerts: updated });
         onAlertSet(updated);
+      } catch {
+        // silently ignore — alert wasn't saved, will be apparent to user
+      }
+      render();
+    });
+    existingAlerts.forEach((alert) => {
+      const key = `${alert.mint.slice(0, 8)}_${alert.condition}`;
+      el.querySelector(`#qd-alert-del-${key}`)?.addEventListener("click", async () => {
+        try {
+          const existing = await sendBg<PriceAlert[]>({ type: "get_alerts" });
+          const updated = existing.filter(a => !(a.mint === alert.mint && a.condition === alert.condition));
+          await sendBg({ type: "set_alerts", alerts: updated });
+          onAlertSet(updated);
+        } catch {
+          // silently ignore — next render will reflect actual state
+        }
         render();
       });
     });
@@ -106,11 +115,14 @@ function buildAlertHTML(
 <button id="qd-alert-set" class="qd-al-btn">SET ALERT</button>
 ${alerts.length > 0 ? `
 <div class="qd-al-list">
-  ${alerts.map((a, i) => `
+  ${alerts.map((a) => {
+    const key = `${a.mint.slice(0, 8)}_${a.condition}`;
+    return `
     <div class="qd-al-item">
       <span>${a.ticker} ${a.condition} $${a.price}${a.triggered ? '<span class="qd-al-triggered">✓ TRIGGERED</span>' : ""}</span>
-      <button class="qd-al-del" id="qd-alert-del-${i}">✕</button>
+      <button class="qd-al-del" id="qd-alert-del-${key}">✕</button>
     </div>
-  `).join("")}
+  `;
+  }).join("")}
 </div>` : ""}`;
 }
