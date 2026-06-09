@@ -1,6 +1,8 @@
 import { sendBg } from "./shared";
 import type { WalletState } from "./types";
 
+const SOL_ADDR_RE = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
+
 function formatDuration(ms: number): string {
   const s = Math.floor(ms / 1000);
   if (s < 60) return `${s}s`;
@@ -61,10 +63,18 @@ function init(): void {
     });
   });
 
-  // ── Wallet connect (lazy Reown — keeps popup.js tiny via code splitting) ───
-  const connectBtn = document.getElementById("connect-btn") as HTMLButtonElement;
+  // ── Wallet connect ─────────────────────────────────────────────────────────
+  const connectBtn  = document.getElementById("connect-btn") as HTMLButtonElement;
+  const addrForm    = document.getElementById("addr-form") as HTMLElement;
+  const addrInput   = document.getElementById("addr-input") as HTMLInputElement;
+  const addrConfirm = document.getElementById("addr-confirm") as HTMLButtonElement;
+  const addrCancel  = document.getElementById("addr-cancel") as HTMLButtonElement;
+  const addrErr     = document.getElementById("addr-err") as HTMLElement;
+
+  let currentWallet: WalletState = { address: null, adapter: null, connected: false };
 
   function renderConnectBtn(w: WalletState): void {
+    currentWallet = w;
     if (w.connected && w.address) {
       connectBtn.textContent = `${w.address.slice(0, 6)}…${w.address.slice(-4)}`;
       connectBtn.classList.add("connected");
@@ -74,23 +84,51 @@ function init(): void {
     }
   }
 
-  let reownReady = false;
+  function showForm(): void {
+    addrForm.classList.add("visible");
+    addrInput.value = "";
+    addrErr.classList.remove("visible");
+    addrInput.focus();
+  }
+
+  function hideForm(): void {
+    addrForm.classList.remove("visible");
+  }
+
+  async function confirmAddress(): Promise<void> {
+    const addr = addrInput.value.trim();
+    if (!SOL_ADDR_RE.test(addr)) {
+      addrErr.classList.add("visible");
+      return;
+    }
+    addrErr.classList.remove("visible");
+    const w: WalletState = { address: addr, adapter: "manual", connected: true };
+    await sendBg({ type: "set_wallet", wallet: w }).catch(() => {});
+    renderConnectBtn(w);
+    hideForm();
+  }
+
   connectBtn.addEventListener("click", async () => {
-    if (!reownReady) {
-      const { initReown, openConnectModal, subscribeReownWallet } =
-        await import("./wallet-reown");
-      initReown();
-      reownReady = true;
-      subscribeReownWallet((newWallet) => {
-        renderConnectBtn(newWallet);
-        sendBg({ type: "set_wallet", wallet: newWallet }).catch(() => {});
-      });
-      await openConnectModal();
+    if (currentWallet.connected) {
+      // Disconnect
+      const w: WalletState = { address: null, adapter: null, connected: false };
+      await sendBg({ type: "set_wallet", wallet: w }).catch(() => {});
+      renderConnectBtn(w);
+      hideForm();
     } else {
-      const { openConnectModal } = await import("./wallet-reown");
-      await openConnectModal();
+      // Show paste-address form
+      showForm();
     }
   });
+
+  addrConfirm.addEventListener("click", () => { confirmAddress().catch(() => {}); });
+
+  addrInput.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") { confirmAddress().catch(() => {}); }
+    if (e.key === "Escape") { hideForm(); }
+  });
+
+  addrCancel.addEventListener("click", hideForm);
 
   // ── Async state load (never blocks buttons above) ──────────────────────────
   let sessionIntervalId: ReturnType<typeof setInterval> | null = null;
