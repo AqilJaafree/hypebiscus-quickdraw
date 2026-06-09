@@ -9,23 +9,15 @@ function formatDuration(ms: number): string {
   return `${Math.floor(m / 60)}h ${m % 60}m`;
 }
 
-async function getSessionStart(): Promise<number> {
-  const { sessionStart } = await chrome.storage.session.get("sessionStart");
-  if (sessionStart) return sessionStart as number;
-  const now = Date.now();
-  await chrome.storage.session.set({ sessionStart: now });
-  return now;
-}
-
 function init(): void {
   // ── Close ──────────────────────────────────────────────────────────────────
   document.getElementById("close-btn")?.addEventListener("click", () => window.close());
 
   // ── Tabs ───────────────────────────────────────────────────────────────────
-  const tabState  = document.getElementById("tab-state")!;
-  const tabSkills = document.getElementById("tab-skills")!;
-  const paneState  = document.getElementById("pane-state")!;
-  const paneSkills = document.getElementById("pane-skills")!;
+  const tabState   = document.getElementById("tab-state") as HTMLButtonElement;
+  const tabSkills  = document.getElementById("tab-skills") as HTMLButtonElement;
+  const paneState  = document.getElementById("pane-state") as HTMLElement;
+  const paneSkills = document.getElementById("pane-skills") as HTMLElement;
 
   tabState.addEventListener("click", () => {
     tabState.classList.add("active");   tabSkills.classList.remove("active");
@@ -37,10 +29,10 @@ function init(): void {
   });
 
   // ── Status ─────────────────────────────────────────────────────────────────
-  const dot       = document.getElementById("status-dot")!;
-  const statusTx  = document.getElementById("status-text")!;
-  const pauseBtn  = document.getElementById("pause-btn") as HTMLButtonElement;
-  let isEnabled   = true;
+  const dot      = document.getElementById("status-dot") as HTMLElement;
+  const statusTx = document.getElementById("status-text") as HTMLElement;
+  const pauseBtn = document.getElementById("pause-btn") as HTMLButtonElement;
+  let isEnabled  = true;
 
   function renderStatus(on: boolean): void {
     dot.className = "status-dot" + (on ? "" : " paused");
@@ -55,8 +47,8 @@ function init(): void {
   });
 
   // ── Stats ──────────────────────────────────────────────────────────────────
-  const lastSeenEl    = document.getElementById("last-seen")!;
-  const sessionTimeEl = document.getElementById("session-time")!;
+  const lastSeenEl    = document.getElementById("last-seen") as HTMLElement;
+  const sessionTimeEl = document.getElementById("session-time") as HTMLElement;
 
   // ── AI mode toggle ─────────────────────────────────────────────────────────
   const aiButtons = ["ai-auto", "ai-cloud", "ai-local"].map(
@@ -69,7 +61,7 @@ function init(): void {
     });
   });
 
-  // ── Wallet connect (lazy Reown init) ───────────────────────────────────────
+  // ── Wallet connect (lazy Reown — keeps popup.js tiny via code splitting) ───
   const connectBtn = document.getElementById("connect-btn") as HTMLButtonElement;
 
   function renderConnectBtn(w: WalletState): void {
@@ -100,20 +92,24 @@ function init(): void {
     }
   });
 
-  // ── Load state async (display only — never blocks buttons above) ───────────
+  // ── Async state load (never blocks buttons above) ──────────────────────────
+  let sessionIntervalId: ReturnType<typeof setInterval> | null = null;
+
   Promise.allSettled([
     sendBg<boolean>({ type: "get_detection_enabled" }),
     sendBg<WalletState>({ type: "get_wallet" }),
     chrome.storage.local.get("lastToken"),
-    getSessionStart(),
-  ]).then(([enabledResult, walletResult, lastTokenResult, sessionStartResult]) => {
+    chrome.storage.session.get("sessionStart"),
+  ]).then(([enabledResult, walletResult, lastTokenResult, sessionResult]) => {
     if (enabledResult.status === "fulfilled") {
       isEnabled = enabledResult.value;
       renderStatus(isEnabled);
     }
+
     if (walletResult.status === "fulfilled") {
       renderConnectBtn(walletResult.value);
     }
+
     const lastToken = lastTokenResult.status === "fulfilled"
       ? (lastTokenResult.value as { lastToken?: string }).lastToken ?? null
       : null;
@@ -121,13 +117,17 @@ function init(): void {
       ? `${lastToken.slice(0, 6)}…${lastToken.slice(-4)}`
       : "—";
 
-    const sessionStart = sessionStartResult.status === "fulfilled"
-      ? sessionStartResult.value
-      : Date.now();
-    sessionTimeEl.textContent = formatDuration(Date.now() - sessionStart);
-    setInterval(() => {
+    const rawStart = sessionResult.status === "fulfilled"
+      ? (sessionResult.value as { sessionStart?: number }).sessionStart
+      : undefined;
+    const sessionStart = rawStart ?? Date.now();
+
+    const updateTime = (): void => {
       sessionTimeEl.textContent = formatDuration(Date.now() - sessionStart);
-    }, 30_000);
+    };
+    updateTime();
+    if (sessionIntervalId) clearInterval(sessionIntervalId);
+    sessionIntervalId = setInterval(updateTime, 1_000);
   });
 }
 

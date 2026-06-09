@@ -111,6 +111,11 @@ chrome.runtime.onInstalled.addListener(() => {
   chrome.alarms.create(ALERT_ALARM, { periodInMinutes: 5 });
 });
 
+// Track session start time (chrome.storage.session resets on browser close)
+chrome.storage.session.get("sessionStart").then(({ sessionStart }) => {
+  if (!sessionStart) chrome.storage.session.set({ sessionStart: Date.now() });
+}).catch(() => {});
+
 chrome.alarms.onAlarm.addListener(async (alarm) => {
   if (alarm.name !== ALERT_ALARM) return;
 
