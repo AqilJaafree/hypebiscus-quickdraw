@@ -291,6 +291,7 @@ async function handleMessage(msg: BgRequest, respond: (r: BgResponse) => void): 
       }
       dedupMap.set(msg.address, Date.now());
       const data = await getTokenData(msg.address);
+      chrome.storage.local.set({ lastToken: msg.address }).catch(() => {});
       respond({ ok: true, data });
       return;
     }
