@@ -117,6 +117,13 @@ export class PopupController {
     }
   }
 
+  appendNarration(delta: string): void {
+    const el = this.shadow.getElementById("qd-narration");
+    if (!el) return;
+    if (el.style.display === "none" || !el.style.display) el.style.display = "block";
+    el.textContent += delta;
+  }
+
   showError(msg: string): void {
     const labelEl = this.shadow.getElementById("qd-score-label");
     if (labelEl) labelEl.textContent = msg || "Not found";
@@ -147,9 +154,11 @@ function buildShell(address: string): string {
   .qd-addr:hover { color: #666; }
   .qd-copy-icon { opacity: 0; font-size: 9px; }
   .qd-addr:hover .qd-copy-icon { opacity: 1; }
-  .qd-price-row { padding: 8px 12px 6px; display: flex; align-items: center; gap: 10px; }
+  .qd-price-row { padding: 8px 12px 4px; display: flex; align-items: center; gap: 10px; }
   #qd-price { font-size: 13px; color: #fff; font-weight: 700; }
   #qd-change { font-size: 12px; font-weight: 700; }
+  #qd-narration { display: none; padding: 6px 12px 8px; font-size: 10px; color: #666;
+    line-height: 1.5; font-style: italic; border-top: 1px solid #1e1e1e; }
   .qd-sep { height: 1px; background: #1e1e1e; }
   .qd-actions { display: flex; height: 34px; }
   #qd-buy { flex: 1; background: #2a2a2a; color: #555; font-family: ${DS.font}; font-size: 11px;
@@ -178,6 +187,7 @@ function buildShell(address: string): string {
     <span id="qd-price"></span>
     <span id="qd-change"></span>
   </div>
+  <div id="qd-narration"></div>
   <div class="qd-sep"></div>
   <div class="qd-actions">
     <button id="qd-buy">BUY</button>
