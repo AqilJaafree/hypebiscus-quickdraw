@@ -157,6 +157,68 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
   }
 });
 
+// ── AI narration port ─────────────────────────────────────────────────────────
+chrome.runtime.onConnect.addListener((port) => {
+  if (port.name !== "narration") return;
+
+  port.onMessage.addListener(async (req: {
+    address: string;
+    safety: { score: number; label: string; summary: string };
+    price: { usd: number; symbol: string } | null;
+  }) => {
+    try {
+      const system = "You are a concise DeFi analyst for Solana traders. Write 1-2 sentences about the token's risk and key facts. Be direct. No disclaimers.";
+      const user = [
+        `Token address: ${req.address}`,
+        `Safety score: ${req.safety.score}/100 (${req.safety.label})`,
+        `Details: ${req.safety.summary}`,
+        req.price ? `Price: $${req.price.usd.toFixed(6)} (${req.price.symbol})` : "Price: unavailable",
+      ].join("\n");
+
+      const resp = await fetch(`${WORKER_URL}/ai/fast`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Quickdraw-Client": "extension",
+          "Authorization": `Bearer ${EXTENSION_SECRET}`,
+        },
+        body: JSON.stringify({
+          model: "claude-haiku-4-5-20251001",
+          max_tokens: 120,
+          system: [{ type: "text", text: system, cache_control: { type: "ephemeral" } }],
+          messages: [{ role: "user", content: user }],
+          stream: true,
+        }),
+      });
+
+      if (!resp.ok || !resp.body) { port.postMessage({ type: "done" }); return; }
+
+      const reader = resp.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() ?? "";
+        for (const line of lines) {
+          if (!line.startsWith("data: ")) continue;
+          const payload = line.slice(6).trim();
+          if (payload === "[DONE]") continue;
+          try {
+            const event = JSON.parse(payload) as { type: string; delta?: { type: string; text?: string } };
+            if (event.type === "content_block_delta" && event.delta?.text) {
+              port.postMessage({ type: "chunk", text: event.delta.text });
+            }
+          } catch { /* malformed SSE line */ }
+        }
+      }
+      port.postMessage({ type: "done" });
+    } catch { port.postMessage({ type: "done" }); }
+  });
+});
+
 // ── Deep analysis port ─────────────────────────────────────────────────────────
 chrome.runtime.onConnect.addListener((port) => {
   if (port.name !== "deep-analysis") return;

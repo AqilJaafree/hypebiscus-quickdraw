@@ -1,7 +1,6 @@
 import { detectInSelection, detectInText } from "./detector";
 import { createPopup, removePopup, PopupController } from "./popup-ui";
 import { sendBg } from "./shared";
-import { streamNarration } from "./worker-client";
 import type { TokenData } from "./types";
 
 function clampPosition(x: number, y: number): { x: number; y: number } {
@@ -62,13 +61,20 @@ async function triggerAddress(address: string, rawX: number, rawY: number): Prom
   tokenData = fetchResult.value;
   controller.showToken(tokenData.safety, tokenData.price);
 
-  // Stream Haiku analysis — silent no-op if worker is not running
-  streamNarration(
-    address,
-    tokenData.safety,
-    tokenData.price ? { usd: tokenData.price.usd, symbol: tokenData.price.symbol } : null,
-    (delta) => controller.appendNarration(delta),
-  ).catch(() => {});
+  // Stream Haiku analysis via background port — avoids ad-blocker blocks on content script fetches
+  try {
+    const port = chrome.runtime.connect({ name: "narration" });
+    port.onMessage.addListener((msg: { type: string; text?: string }) => {
+      if (msg.type === "chunk" && msg.text) controller.appendNarration(msg.text);
+      if (msg.type === "done") port.disconnect();
+    });
+    port.onDisconnect.addListener(() => {});
+    port.postMessage({
+      address,
+      safety: { score: tokenData.safety.score, label: tokenData.safety.label, summary: tokenData.safety.summary },
+      price: tokenData.price ? { usd: tokenData.price.usd, symbol: tokenData.price.symbol } : null,
+    });
+  } catch { /* worker not running — no narration */ }
 }
 
 // ── Selection detection ────────────────────────────────────────────────────────
