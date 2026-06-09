@@ -37,7 +37,7 @@ export interface SwapQuote {
 
 export interface WalletState {
   address: string | null;
-  adapter: "phantom" | "backpack" | "solflare" | "reown" | null;
+  adapter: "phantom" | "backpack" | "solflare" | "reown" | "injected" | "manual" | null;
   connected: boolean;
 }
 

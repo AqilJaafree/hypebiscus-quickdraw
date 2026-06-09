@@ -11,6 +11,20 @@ function formatDuration(ms: number): string {
   return `${Math.floor(m / 60)}h ${m % 60}m`;
 }
 
+// Ask the active tab's content script to connect the injected wallet.
+// Content scripts run on real web pages where window.phantom etc. are injected.
+async function connectViaContentScript(): Promise<string> {
+  const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+  const tab = tabs[0];
+  if (!tab?.id) throw new Error("no_tab");
+
+  const result = await chrome.tabs.sendMessage(tab.id, { type: "WALLET_CONNECT_REQUEST" }) as
+    { ok: boolean; address?: string; error?: string };
+
+  if (!result.ok) throw new Error(result.error ?? "Connection failed");
+  return result.address!;
+}
+
 function init(): void {
   // ── Close ──────────────────────────────────────────────────────────────────
   document.getElementById("close-btn")?.addEventListener("click", () => window.close());
@@ -84,10 +98,15 @@ function init(): void {
     }
   }
 
-  function showForm(): void {
+  function showForm(errMsg?: string): void {
     addrForm.classList.add("visible");
     addrInput.value = "";
-    addrErr.classList.remove("visible");
+    if (errMsg) {
+      addrErr.textContent = errMsg;
+      addrErr.classList.add("visible");
+    } else {
+      addrErr.classList.remove("visible");
+    }
     addrInput.focus();
   }
 
@@ -95,42 +114,63 @@ function init(): void {
     addrForm.classList.remove("visible");
   }
 
+  async function saveWallet(w: WalletState): Promise<void> {
+    await sendBg({ type: "set_wallet", wallet: w }).catch(() => {});
+    renderConnectBtn(w);
+  }
+
   async function confirmAddress(): Promise<void> {
     const addr = addrInput.value.trim();
     if (!SOL_ADDR_RE.test(addr)) {
+      addrErr.textContent = "Invalid Solana address";
       addrErr.classList.add("visible");
       return;
     }
-    addrErr.classList.remove("visible");
     const w: WalletState = { address: addr, adapter: "manual", connected: true };
-    await sendBg({ type: "set_wallet", wallet: w }).catch(() => {});
-    renderConnectBtn(w);
+    await saveWallet(w);
     hideForm();
   }
 
   connectBtn.addEventListener("click", async () => {
     if (currentWallet.connected) {
-      // Disconnect
       const w: WalletState = { address: null, adapter: null, connected: false };
-      await sendBg({ type: "set_wallet", wallet: w }).catch(() => {});
-      renderConnectBtn(w);
+      await saveWallet(w);
       hideForm();
-    } else {
-      // Show paste-address form
-      showForm();
+      return;
+    }
+
+    // Try injected wallet via content script bridge (same idea as Rust webview bridge)
+    connectBtn.textContent = "Connecting…";
+    connectBtn.disabled = true;
+    try {
+      const address = await connectViaContentScript();
+      const w: WalletState = { address, adapter: "phantom", connected: true };
+      await saveWallet(w);
+    } catch (err) {
+      const msg = (err as Error).message;
+      renderConnectBtn(currentWallet); // reset button text
+      if (msg === "no_tab" || msg.includes("Receiving end does not exist")) {
+        // No active web tab → paste manually
+        showForm("Open a web page first, then connect.");
+      } else if (msg.includes("User rejected") || msg.includes("cancelled")) {
+        // User dismissed Phantom popup — do nothing
+      } else {
+        // Wallet not installed or other error → offer manual entry
+        showForm(msg.length < 80 ? msg : "Wallet not found. Paste address instead.");
+      }
+    } finally {
+      connectBtn.disabled = false;
     }
   });
 
   addrConfirm.addEventListener("click", () => { confirmAddress().catch(() => {}); });
-
   addrInput.addEventListener("keydown", (e) => {
-    if (e.key === "Enter") { confirmAddress().catch(() => {}); }
-    if (e.key === "Escape") { hideForm(); }
+    if (e.key === "Enter") confirmAddress().catch(() => {});
+    if (e.key === "Escape") hideForm();
   });
-
   addrCancel.addEventListener("click", hideForm);
 
-  // ── Async state load (never blocks buttons above) ──────────────────────────
+  // ── Async state load ───────────────────────────────────────────────────────
   let sessionIntervalId: ReturnType<typeof setInterval> | null = null;
 
   Promise.allSettled([
