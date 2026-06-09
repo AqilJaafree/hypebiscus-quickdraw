@@ -82,9 +82,11 @@ function setActiveTab(shadow: ShadowRoot, active: SkillTab): void {
     if (!el) return;
     if (tab === active) {
       el.style.color = DS.yellow;
+      el.style.background = "#1e1e1e";
       el.style.borderBottom = `2px solid ${DS.yellow}`;
     } else {
-      el.style.color = DS.textDim;
+      el.style.color = "#555";
+      el.style.background = DS.bg;
       el.style.borderBottom = "2px solid transparent";
     }
   });
@@ -190,9 +192,9 @@ function buildShell(address: string, skills?: SkillSettings): string {
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   :host { font-family: ${DS.font}; font-size: 12px; }
-  .popup { width: 288px; background: ${DS.bg}; border: 2px solid #000; box-shadow: 3px 3px 0 #333; overflow: hidden; }
+  .popup { width: 260px; background: ${DS.bg}; border: 2px solid #333; box-shadow: 3px 3px 0 #333; overflow: hidden; }
   #qd-header { padding: 10px 12px; display: flex; align-items: center; gap: 10px;
-    background: ${DS.bg}; color: #000; transition: background 0.15s; }
+    background: #222; color: #555; transition: background 0.15s; }
   #qd-score { font-size: 34px; font-weight: 700; line-height: 1; min-width: 48px; }
   .header-meta { flex: 1; }
   #qd-score-label { font-size: 9px; font-weight: 700; letter-spacing: 0.08em; opacity: 0.6; }
@@ -212,17 +214,16 @@ function buildShell(address: string, skills?: SkillSettings): string {
   #qd-vol { padding: 0 12px 6px; font-size: 10px; color: ${DS.textMut}; display: none; }
   .qd-sep { border: none; border-top: 1px solid #1e1e1e; }
   .qd-skill-tabs { display: flex; align-items: stretch; border-top: 1px solid #1e1e1e; }
-  .qd-tab { flex: 1; padding: 8px 0; font-size: 10px; font-weight: 700; letter-spacing: 0.06em;
-    cursor: pointer; border: none; background: ${DS.bg}; color: ${DS.textDim};
+  .qd-tab { flex: 1; height: 32px; font-size: 9px; font-weight: 700; letter-spacing: 0.06em;
+    cursor: pointer; border: none; background: ${DS.bg}; color: #555;
     font-family: inherit; border-bottom: 2px solid transparent; transition: color 0.1s; }
   .qd-tab:hover { color: #aaa; }
   .qd-tab-div { width: 1px; background: #2a2a2a; flex-shrink: 0; }
-  .qd-panel-sep { border: none; border-top: 1px solid #2a2a2a; }
   #qd-panel { min-height: 40px; }
 </style>
 <div class="popup">
   <div id="qd-header">
-    <span id="qd-score">?</span>
+    <span id="qd-score">—</span>
     <div class="header-meta">
       <div id="qd-score-label">FETCHING…</div>
       <div id="qd-ticker">⚡ QUICKDRAW</div>
@@ -240,7 +241,6 @@ function buildShell(address: string, skills?: SkillSettings): string {
   <div id="qd-vol"></div>
   <hr class="qd-sep" />
   <div class="qd-skill-tabs">${tabsHtml}</div>
-  <hr class="qd-panel-sep" />
   <div id="qd-panel"></div>
 </div>`;
 }

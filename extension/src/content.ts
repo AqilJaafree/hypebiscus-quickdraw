@@ -23,8 +23,15 @@ function clampPosition(x: number, y: number): { x: number; y: number } {
 let activeController: PopupController | null = null;
 let detectionEnabled = true;
 
+const lastTriggerMap = new Map<string, number>();
+const CONTENT_DEDUP_MS = 30_000;
+
 async function triggerAddress(address: string, rawX: number, rawY: number): Promise<void> {
   if (!detectionEnabled) return;
+
+  const last = lastTriggerMap.get(address);
+  if (last && Date.now() - last < CONTENT_DEDUP_MS) return;
+  lastTriggerMap.set(address, Date.now());
 
   const { x, y } = clampPosition(rawX, rawY);
 
