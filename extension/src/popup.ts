@@ -1,7 +1,6 @@
 import { sendBg } from "./shared";
 import type { WalletState } from "./types";
 
-// ── Session time ───────────────────────────────────────────────────────────────
 function formatDuration(ms: number): string {
   const s = Math.floor(ms / 1000);
   if (s < 60) return `${s}s`;
@@ -18,19 +17,7 @@ async function getSessionStart(): Promise<number> {
   return now;
 }
 
-async function init(): Promise<void> {
-  const [enabledResult, walletResult, lastTokenResult, sessionStartResult] = await Promise.allSettled([
-    sendBg<boolean>({ type: "get_detection_enabled" }),
-    sendBg<WalletState>({ type: "get_wallet" }),
-    chrome.storage.local.get("lastToken"),
-    getSessionStart(),
-  ]);
-
-  const enabled     = enabledResult.status     === "fulfilled" ? enabledResult.value     : true;
-  const wallet      = walletResult.status      === "fulfilled" ? walletResult.value      : { address: null, adapter: null, connected: false } as WalletState;
-  const lastToken   = lastTokenResult.status   === "fulfilled" ? (lastTokenResult.value as { lastToken?: string }).lastToken ?? null : null;
-  const sessionStart = sessionStartResult.status === "fulfilled" ? sessionStartResult.value : Date.now();
-
+function init(): void {
   // ── Close ──────────────────────────────────────────────────────────────────
   document.getElementById("close-btn")?.addEventListener("click", () => window.close());
 
@@ -50,17 +37,16 @@ async function init(): Promise<void> {
   });
 
   // ── Status ─────────────────────────────────────────────────────────────────
-  const dot      = document.getElementById("status-dot")!;
-  const statusTx = document.getElementById("status-text")!;
-  const pauseBtn = document.getElementById("pause-btn") as HTMLButtonElement;
-  let isEnabled  = enabled;
+  const dot       = document.getElementById("status-dot")!;
+  const statusTx  = document.getElementById("status-text")!;
+  const pauseBtn  = document.getElementById("pause-btn") as HTMLButtonElement;
+  let isEnabled   = true;
 
   function renderStatus(on: boolean): void {
     dot.className = "status-dot" + (on ? "" : " paused");
     statusTx.textContent = on ? "ACTIVE" : "PAUSED";
     pauseBtn.textContent = on ? "Pause" : "Resume";
   }
-  renderStatus(isEnabled);
 
   pauseBtn.addEventListener("click", async () => {
     isEnabled = !isEnabled;
@@ -69,23 +55,14 @@ async function init(): Promise<void> {
   });
 
   // ── Stats ──────────────────────────────────────────────────────────────────
-  const lastSeenEl   = document.getElementById("last-seen")!;
+  const lastSeenEl    = document.getElementById("last-seen")!;
   const sessionTimeEl = document.getElementById("session-time")!;
-
-  lastSeenEl.textContent = lastToken ? `${lastToken.slice(0, 6)}…${lastToken.slice(-4)}` : "—";
-  sessionTimeEl.textContent = formatDuration(Date.now() - sessionStart);
-
-  // Update session time every 30s while popup is open
-  setInterval(() => {
-    sessionTimeEl.textContent = formatDuration(Date.now() - sessionStart);
-  }, 30_000);
 
   // ── AI mode toggle ─────────────────────────────────────────────────────────
   const aiButtons = ["ai-auto", "ai-cloud", "ai-local"].map(
     id => document.getElementById(id) as HTMLButtonElement,
   );
-
-  aiButtons.forEach((btn) => {
+  aiButtons.forEach(btn => {
     btn.addEventListener("click", () => {
       aiButtons.forEach(b => b.classList.remove("active"));
       btn.classList.add("active");
@@ -104,7 +81,6 @@ async function init(): Promise<void> {
       connectBtn.classList.remove("connected");
     }
   }
-  renderConnectBtn(wallet);
 
   let reownReady = false;
   connectBtn.addEventListener("click", async () => {
@@ -123,6 +99,36 @@ async function init(): Promise<void> {
       await openConnectModal();
     }
   });
+
+  // ── Load state async (display only — never blocks buttons above) ───────────
+  Promise.allSettled([
+    sendBg<boolean>({ type: "get_detection_enabled" }),
+    sendBg<WalletState>({ type: "get_wallet" }),
+    chrome.storage.local.get("lastToken"),
+    getSessionStart(),
+  ]).then(([enabledResult, walletResult, lastTokenResult, sessionStartResult]) => {
+    if (enabledResult.status === "fulfilled") {
+      isEnabled = enabledResult.value;
+      renderStatus(isEnabled);
+    }
+    if (walletResult.status === "fulfilled") {
+      renderConnectBtn(walletResult.value);
+    }
+    const lastToken = lastTokenResult.status === "fulfilled"
+      ? (lastTokenResult.value as { lastToken?: string }).lastToken ?? null
+      : null;
+    lastSeenEl.textContent = lastToken
+      ? `${lastToken.slice(0, 6)}…${lastToken.slice(-4)}`
+      : "—";
+
+    const sessionStart = sessionStartResult.status === "fulfilled"
+      ? sessionStartResult.value
+      : Date.now();
+    sessionTimeEl.textContent = formatDuration(Date.now() - sessionStart);
+    setInterval(() => {
+      sessionTimeEl.textContent = formatDuration(Date.now() - sessionStart);
+    }, 30_000);
+  });
 }
 
-init().catch(console.error);
+init();
