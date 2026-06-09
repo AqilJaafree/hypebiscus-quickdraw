@@ -22,7 +22,6 @@ interface TradeState {
   quote: SwapQuote | null;
   loading: boolean;
   error: string | null;
-  confirming: boolean;
 }
 
 export function buildTradePanel(
@@ -33,7 +32,7 @@ export function buildTradePanel(
   const el = document.createElement("div");
   el.style.cssText = `padding:10px 12px;font-family:${DS.font};`;
 
-  let state: TradeState = { solInput: "0.5", quote: null, loading: false, error: null, confirming: false };
+  let state: TradeState = { solInput: "0.5", quote: null, loading: false, error: null };
 
   function render(): void {
     el.innerHTML = buildTradeHTML(ticker, state, wallet);
@@ -78,26 +77,9 @@ export function buildTradePanel(
     render();
   }
 
-  async function executeSwap(): Promise<void> {
-    if (!state.quote || !wallet.address) return;
-    state = { ...state, confirming: true };
-    render();
-    try {
-      await sendBg<string>({
-        type: "swap_tx",
-        inputMint: SOL_MINT,
-        outputMint,
-        amountLamports: Math.floor(parseFloat(state.solInput) * LAMPORTS_PER_SOL),
-        walletAddress: wallet.address,
-      });
-      // Full in-extension signing is Phase 3 (requires native wallet bridge)
-      const jupUrl = `https://jup.ag/swap/SOL-${ticker}`;
-      window.open(jupUrl, "_blank");
-      state = { ...state, confirming: false };
-    } catch (err: unknown) {
-      state = { ...state, confirming: false, error: err instanceof Error ? err.message : "Swap failed" };
-    }
-    render();
+  function executeSwap(): void {
+    // Phase 3 will add native in-extension signing; for now redirect to jup.ag
+    window.open(`https://jup.ag/swap/SOL-${ticker}`, "_blank");
   }
 
   render();
@@ -111,11 +93,7 @@ function buildTradeHTML(ticker: string, state: TradeState, wallet: WalletState):
   const impact = state.quote
     ? `${(state.quote.priceImpactPct * 100).toFixed(2)}%`
     : "—";
-  const swapLabel = state.confirming
-    ? "CONFIRMING…"
-    : !wallet.connected
-      ? "CONNECT WALLET FIRST"
-      : "SWAP NOW ↗";
+  const swapLabel = !wallet.connected ? "CONNECT WALLET FIRST" : "SWAP NOW ↗";
 
   return `
 <style>
@@ -147,5 +125,5 @@ function buildTradeHTML(ticker: string, state: TradeState, wallet: WalletState):
   <span>${state.loading ? "fetching quote…" : ""}</span>
 </div>
 ${state.error ? `<div class="qd-tr-err">⚠ ${state.error}</div>` : ""}
-<button id="qd-trade-swap" class="qd-tr-swap" ${state.confirming ? "disabled" : ""}>${swapLabel}</button>`;
+<button id="qd-trade-swap" class="qd-tr-swap">${swapLabel}</button>`;
 }

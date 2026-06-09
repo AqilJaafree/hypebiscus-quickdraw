@@ -133,7 +133,7 @@ export class PopupController {
           changeEl.style.color = changeColor;
         }
         const volEl = this.shadow.getElementById("qd-vol");
-        const vol24h = (price as TokenPrice & { volume24h?: number }).volume24h;
+        const vol24h = price.volume24h;
         if (volEl && vol24h) {
           const vol = vol24h >= 1_000_000
             ? `$${(vol24h / 1_000_000).toFixed(1)}M`

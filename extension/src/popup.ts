@@ -6,12 +6,16 @@ import { DEFAULT_SKILL_SETTINGS } from "./types";
 async function init(): Promise<void> {
   initReown();
 
-  const [wallet, enabled, watchlist, skills] = await Promise.all([
+  const [walletResult, enabledResult, watchlistResult, skillsResult] = await Promise.allSettled([
     sendBg<WalletState>({ type: "get_wallet" }),
     sendBg<boolean>({ type: "get_detection_enabled" }),
     sendBg<WatchItem[]>({ type: "get_watchlist" }),
     sendBg<SkillSettings>({ type: "get_skill_settings" }),
   ]);
+  const wallet   = walletResult.status   === "fulfilled" ? walletResult.value   : { address: null, adapter: null, connected: false } as WalletState;
+  const enabled  = enabledResult.status  === "fulfilled" ? enabledResult.value  : true;
+  const watchlist = watchlistResult.status === "fulfilled" ? watchlistResult.value : [] as WatchItem[];
+  const skills   = skillsResult.status   === "fulfilled" ? skillsResult.value   : DEFAULT_SKILL_SETTINGS;
 
   // ── Tab switcher ──────────────────────────────────────────────────────────
   const tabState  = document.getElementById("tab-state")!;

@@ -100,14 +100,16 @@ async function buildSwapTxFromWorker(
     body: JSON.stringify({ quoteResponse: quote, userPublicKey: walletAddress }),
   });
   if (!resp.ok) throw new Error("Swap build failed");
-  const data = await resp.json<{ swapTransaction: string }>();
+  const data = await resp.json() as { swapTransaction: string };
   return data.swapTransaction;
 }
 
 // ── Price alert polling ────────────────────────────────────────────────────────
 const ALERT_ALARM = "qd-alert-check";
 
-chrome.alarms.create(ALERT_ALARM, { periodInMinutes: 5 });
+chrome.runtime.onInstalled.addListener(() => {
+  chrome.alarms.create(ALERT_ALARM, { periodInMinutes: 5 });
+});
 
 chrome.alarms.onAlarm.addListener(async (alarm) => {
   if (alarm.name !== ALERT_ALARM) return;
@@ -125,7 +127,7 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
       const params = new URLSearchParams({ ids: mint });
       const resp = await fetch(`${WORKER_URL}/defi/jupiter/price?${params}`);
       if (!resp.ok) continue;
-      const data = await resp.json<{ data: Record<string, { price: number }> }>();
+      const data = await resp.json() as { data: Record<string, { price: number }> };
       const currentPrice = data.data[mint]?.price;
       if (currentPrice === undefined) continue;
 
@@ -286,7 +288,7 @@ async function handleMessage(msg: BgRequest, respond: (r: BgResponse) => void): 
         respond({ ok: false, error: "Price fetch failed" });
         return;
       }
-      const data = await resp.json<{ data: Record<string, { price: number }> }>();
+      const data = await resp.json() as { data: Record<string, { price: number }> };
       const result: WatchItemWithPrice[] = msg.mints.map(mint => ({
         mint,
         ticker: "",

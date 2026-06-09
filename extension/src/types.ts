@@ -99,8 +99,6 @@ export type DeepPortMessage = DeepPortChunk | DeepPortDone | DeepPortError;
 
 export type BgRequest =
   | { type: "fetch_token"; address: string }
-  | { type: "get_quote"; inputMint: string; outputMint: string; amountLamports: number; slippageBps: number }
-  | { type: "build_swap_tx"; quote: SwapQuote; walletAddress: string }
   | { type: "get_wallet" }
   | { type: "set_wallet"; wallet: WalletState }
   | { type: "get_detection_enabled" }
@@ -119,15 +117,3 @@ export type BgResponse<T = unknown> =
   | { ok: true; data: T }
   | { ok: false; error: string };
 
-export interface WalletBridgeCmd {
-  id: string;
-  cmd: "get_wallet" | "connect" | "sign_and_send";
-  payload?: { adapter?: string; txBase64?: string };
-}
-
-export interface WalletBridgeResult {
-  id: string;
-  ok: boolean;
-  result?: unknown;
-  error?: string;
-}

@@ -49,7 +49,7 @@ async function triggerAddress(address: string, rawX: number, rawY: number): Prom
         if (!tokenData) return;
         const ticker = tokenData.price?.symbol ?? address.slice(0, 6);
         const price = tokenData.price?.usd ?? 0;
-        const vol = (tokenData.price as (typeof tokenData.price & { volume24h?: number }) | null)?.volume24h ?? 0;
+        const vol = tokenData.price?.volume24h ?? 0;
         const safety = tokenData.safety.score;
 
         let panelEl: HTMLElement;
@@ -94,7 +94,8 @@ async function triggerAddress(address: string, rawX: number, rawY: number): Prom
         type: "get_watchlist_prices",
         mints,
       }).catch(() => [] as WatchItemWithPrice[]);
-      watchlistPrices = priceResult.map((p, i) => ({ ...p, ticker: watchlist[i]?.ticker ?? "" }));
+      const tickerByMint = new Map(watchlist.map(w => [w.mint, w.ticker]));
+      watchlistPrices = priceResult.map(p => ({ ...p, ticker: tickerByMint.get(p.mint) ?? "" }));
     }
   }
   if (skillResult.status === "fulfilled") skillSettings = skillResult.value;

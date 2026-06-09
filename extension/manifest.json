@@ -6,7 +6,9 @@
   "minimum_chrome_version": "111",
   "permissions": [
     "storage",
-    "scripting"
+    "scripting",
+    "alarms",
+    "notifications"
   ],
   "host_permissions": [
     "<all_urls>"
@@ -20,12 +22,6 @@
       "matches": ["<all_urls>"],
       "js": ["dist/content.js"],
       "run_at": "document_idle"
-    }
-  ],
-  "web_accessible_resources": [
-    {
-      "resources": ["dist/wallet-bridge.js"],
-      "matches": ["<all_urls>"]
     }
   ],
   "icons": {
