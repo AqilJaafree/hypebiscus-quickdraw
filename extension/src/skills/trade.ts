@@ -1,5 +1,5 @@
 import { DS, brutal } from "../styles";
-import { sendBg } from "../shared";
+import { sendBg, esc } from "../shared";
 import type { SwapQuote, WalletState } from "../types";
 
 const SOL_MINT = "So11111111111111111111111111111111111111112";
@@ -11,10 +11,12 @@ export function formatSolAmount(sol: number): string {
 
 export function parseOutputAmount(rawAmount: string, decimals: number): string {
   if (!rawAmount) return "—";
-  const num = parseInt(rawAmount, 10);
-  if (isNaN(num)) return "—";
-  const val = num / Math.pow(10, decimals);
-  return decimals === 6 ? val.toFixed(6) : val.toFixed(2);
+  const num = BigInt(rawAmount);
+  const divisor = BigInt(Math.pow(10, decimals));
+  const whole = num / divisor;
+  const frac = num % divisor;
+  const fracStr = frac.toString().padStart(decimals, "0").slice(0, decimals === 6 ? 6 : 2);
+  return `${whole}.${fracStr}`;
 }
 
 interface TradeState {
@@ -78,8 +80,8 @@ export function buildTradePanel(
   }
 
   function executeSwap(): void {
-    // Phase 3 will add native in-extension signing; for now redirect to jup.ag
-    window.open(`https://jup.ag/swap/SOL-${ticker}`, "_blank");
+    // Use outputMint (canonical address) not ticker (text, can collide across tokens)
+    window.open(`https://jup.ag/swap/SOL-${outputMint}`, "_blank");
   }
 
   render();
@@ -112,18 +114,18 @@ function buildTradeHTML(ticker: string, state: TradeState, wallet: WalletState):
     font-weight:700; letter-spacing:0.06em; cursor:pointer; font-family:${DS.font};
     ${(!state.quote && !state.loading) || state.confirming ? "opacity:0.6;" : ""} }
 </style>
-<div class="qd-tr-label">BUY ${ticker}</div>
+<div class="qd-tr-label">BUY ${esc(ticker)}</div>
 <div class="qd-tr-row">
-  <input id="qd-trade-sol" class="qd-tr-input" type="number" value="${state.solInput}" placeholder="0.5" min="0.001" step="0.1" />
+  <input id="qd-trade-sol" class="qd-tr-input" type="number" value="${esc(state.solInput)}" placeholder="0.5" min="0.001" step="0.1" />
   <span style="color:${DS.textMut};font-size:10px;align-self:center;">SOL</span>
   <button id="qd-trade-max" class="qd-tr-max">MAX</button>
 </div>
 <div class="qd-tr-arrow">↓</div>
-<div class="qd-tr-out">~ ${outAmt} ${ticker}</div>
+<div class="qd-tr-out">~ ${esc(outAmt)} ${esc(ticker)}</div>
 <div class="qd-tr-meta">
-  <span>Price impact: ${impact}</span>
+  <span>Price impact: ${esc(impact)}</span>
   <span>${state.loading ? "fetching quote…" : ""}</span>
 </div>
-${state.error ? `<div class="qd-tr-err">⚠ ${state.error}</div>` : ""}
-<button id="qd-trade-swap" class="qd-tr-swap">${swapLabel}</button>`;
+${state.error ? `<div class="qd-tr-err">⚠ ${esc(state.error)}</div>` : ""}
+<button id="qd-trade-swap" class="qd-tr-swap">${esc(swapLabel)}</button>`;
 }

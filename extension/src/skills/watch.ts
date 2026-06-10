@@ -1,6 +1,6 @@
 import type { WatchItem, WatchItemWithPrice } from "../types";
 import { DS, brutal } from "../styles";
-import { sendBg } from "../shared";
+import { sendBg, esc } from "../shared";
 
 export function watchlistAdd(list: WatchItem[], item: WatchItem): WatchItem[] {
   if (list.some(w => w.mint === item.mint)) return list;
@@ -40,8 +40,7 @@ export function buildWatchPanel(
     }
 
     currentPrices.forEach(item => {
-      const key = item.mint.slice(0, 8);
-      el.querySelector(`#qd-watch-del-${key}`)?.addEventListener("click", () => handleRemove(item.mint));
+      el.querySelector(`#qd-watch-del-${CSS.escape(item.mint)}`)?.addEventListener("click", () => handleRemove(item.mint));
     });
   }
 
@@ -83,8 +82,8 @@ function buildWatchHTML(
   prices: WatchItemWithPrice[],
 ): string {
   const addBtn = isWatching
-    ? `<button id="qd-watch-remove" style="${brutal("#333")};color:${DS.textMut};padding:8px;width:100%;font-size:11px;font-weight:700;font-family:${DS.font};letter-spacing:0.06em;cursor:pointer;border:none;">✓ WATCHING ${ticker}</button>`
-    : `<button id="qd-watch-add" style="${brutal(DS.yellow)};color:#000;padding:8px;width:100%;font-size:11px;font-weight:700;font-family:${DS.font};letter-spacing:0.06em;cursor:pointer;border:none;">+ ADD ${ticker}</button>`;
+    ? `<button id="qd-watch-remove" style="${brutal("#333")};color:${DS.textMut};padding:8px;width:100%;font-size:11px;font-weight:700;font-family:${DS.font};letter-spacing:0.06em;cursor:pointer;border:none;">✓ WATCHING ${esc(ticker)}</button>`
+    : `<button id="qd-watch-add" style="${brutal(DS.yellow)};color:#000;padding:8px;width:100%;font-size:11px;font-weight:700;font-family:${DS.font};letter-spacing:0.06em;cursor:pointer;border:none;">+ ADD ${esc(ticker)}</button>`;
 
   const listItems = prices.map(item => {
     const change = item.change24h;
@@ -95,14 +94,14 @@ function buildWatchHTML(
     const priceStr = item.priceUsd !== null
       ? `$${item.priceUsd < 0.01 ? item.priceUsd.toFixed(6) : item.priceUsd.toFixed(4)}`
       : "—";
-    const key = item.mint.slice(0, 8);
+    const key = item.mint;
     return `
       <div style="display:flex;justify-content:space-between;align-items:center;padding:4px 0;font-size:10px;">
-        <span style="color:#ccc;font-weight:700;">${item.ticker}</span>
+        <span style="color:#ccc;font-weight:700;">${esc(item.ticker)}</span>
         <span style="display:flex;gap:8px;align-items:center;">
-          <span style="color:#fff;">${priceStr}</span>
-          <span style="color:${changeColor};">${changeStr}</span>
-          <button id="qd-watch-del-${key}" style="background:none;border:none;color:${DS.textMut};cursor:pointer;font-size:11px;padding:0;">✕</button>
+          <span style="color:#fff;">${esc(priceStr)}</span>
+          <span style="color:${changeColor};">${esc(changeStr)}</span>
+          <button id="qd-watch-del-${esc(key)}" style="background:none;border:none;color:${DS.textMut};cursor:pointer;font-size:11px;padding:0;">✕</button>
         </span>
       </div>`;
   }).join("");

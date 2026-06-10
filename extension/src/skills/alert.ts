@@ -1,6 +1,6 @@
 import type { PriceAlert } from "../types";
 import { DS, brutal } from "../styles";
-import { sendBg } from "../shared";
+import { sendBg, esc } from "../shared";
 
 export function alertShouldFire(alert: PriceAlert, currentPrice: number): boolean {
   if (alert.triggered) return false;
@@ -62,8 +62,8 @@ export function buildAlertPanel(
       render();
     });
     existingAlerts.forEach((alert) => {
-      const key = `${alert.mint.slice(0, 8)}_${alert.condition}`;
-      el.querySelector(`#qd-alert-del-${key}`)?.addEventListener("click", async () => {
+      const key = `${alert.mint}_${alert.condition}`;
+      el.querySelector(`#qd-alert-del-${CSS.escape(key)}`)?.addEventListener("click", async () => {
         try {
           const existing = await sendBg<PriceAlert[]>({ type: "get_alerts" });
           const updated = existing.filter(a => !(a.mint === alert.mint && a.condition === alert.condition));
@@ -106,21 +106,21 @@ function buildAlertHTML(
   .qd-al-del:hover { color:${DS.danger}; }
   .qd-al-triggered { color:${DS.safe}; font-size:9px; margin-left:4px; }
 </style>
-<div class="qd-al-label">SET PRICE ALERT — ${ticker}</div>
+<div class="qd-al-label">SET PRICE ALERT — ${esc(ticker)}</div>
 <div class="qd-al-seg">
   <button id="qd-alert-above" style="${condition === "ABOVE" ? activeStyle : inactiveStyle}">ABOVE</button>
   <button id="qd-alert-below" style="${condition === "BELOW" ? activeStyle : inactiveStyle}">BELOW</button>
 </div>
-<input id="qd-alert-price" class="qd-al-input" type="number" placeholder="$ price" value="${priceInput}" step="any" />
+<input id="qd-alert-price" class="qd-al-input" type="number" placeholder="$ price" value="${esc(priceInput)}" step="any" />
 <button id="qd-alert-set" class="qd-al-btn">SET ALERT</button>
 ${alerts.length > 0 ? `
 <div class="qd-al-list">
   ${alerts.map((a) => {
-    const key = `${a.mint.slice(0, 8)}_${a.condition}`;
+    const key = `${a.mint}_${a.condition}`;
     return `
     <div class="qd-al-item">
-      <span>${a.ticker} ${a.condition} $${a.price}${a.triggered ? '<span class="qd-al-triggered">✓ TRIGGERED</span>' : ""}</span>
-      <button class="qd-al-del" id="qd-alert-del-${key}">✕</button>
+      <span>${esc(a.ticker)} ${esc(a.condition)} $${esc(a.price)}${a.triggered ? '<span class="qd-al-triggered">✓ TRIGGERED</span>' : ""}</span>
+      <button class="qd-al-del" id="qd-alert-del-${esc(key)}">✕</button>
     </div>
   `;
   }).join("")}
