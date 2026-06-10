@@ -251,26 +251,27 @@ async function handleHeliusToken(url: URL, env: Env): Promise<Response> {
 }
 
 async function handleAiDeepExtension(req: Request, env: Env): Promise<Response> {
-  const body = await req.json<{
-    mint: string;
-    ticker: string;
-    price: number;
-    safetyScore: number;
-    volume24h: number;
-  }>();
+  const body = await req.json<Record<string, unknown>>();
 
-  if (!body.mint || !body.ticker) {
+  const mint = typeof body.mint === "string" ? body.mint.trim() : "";
+  const ticker = typeof body.ticker === "string" ? body.ticker.trim() : "";
+  if (!mint || !ticker) {
     return err("Missing required fields: mint, ticker", 400);
   }
+
+  const price = typeof body.price === "number" && isFinite(body.price) ? body.price : 0;
+  const safetyScore = typeof body.safetyScore === "number" && isFinite(body.safetyScore)
+    ? Math.max(0, Math.min(100, body.safetyScore)) : 0;
+  const volume24h = typeof body.volume24h === "number" && isFinite(body.volume24h) ? body.volume24h : 0;
 
   const systemPrompt =
     "You are a DeFi analyst for Solana traders. Write 3-4 sentences analyzing the token's risk, momentum, and key on-chain signals. Be direct and data-driven. No disclaimers.";
 
   const userContent = [
-    `Token: ${body.ticker} (${body.mint})`,
-    `Safety score: ${body.safetyScore}/100`,
-    `Price: $${body.price}`,
-    `24h volume: $${body.volume24h.toLocaleString()}`,
+    `Token: ${ticker} (${mint})`,
+    `Safety score: ${safetyScore}/100`,
+    `Price: $${price}`,
+    `24h volume: $${volume24h.toLocaleString()}`,
   ].join("\n");
 
   const upstream = await fetch(`${ANTHROPIC_BASE}/messages`, {
@@ -429,6 +430,10 @@ export default {
       const secret = bearer.startsWith("Bearer ") ? bearer.slice(7) : "";
       if (!secret || secret !== env.EXTENSION_SECRET) {
         return err("Unauthorized", 401);
+      }
+      const ip = req.headers.get("CF-Connecting-IP") ?? "unknown";
+      if (!(await checkRateLimit(ip, env.RATE_LIMIT_KV))) {
+        return err("Too many requests", 429);
       }
       if (url.pathname === "/ai/fast" && req.method === "POST") {
         return handleAi(req, env, "claude-haiku-4-5-20251001");
