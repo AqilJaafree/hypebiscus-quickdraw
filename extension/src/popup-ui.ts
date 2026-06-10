@@ -112,7 +112,7 @@ export class PopupController {
       const changeEl = this.shadow.getElementById("qd-change");
       if (changeEl) {
         changeEl.textContent = `${dir} ${Math.abs(price.change24h).toFixed(1)}%`;
-        changeEl.style.color = bg;
+        changeEl.style.color = price.change24h >= 0 ? "#8BF542" : "#F54242";
       }
     }
   }

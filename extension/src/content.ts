@@ -20,9 +20,15 @@ const CONTENT_DEDUP_MS = 30_000;
 async function triggerAddress(address: string, rawX: number, rawY: number): Promise<void> {
   if (!detectionEnabled) return;
 
+  const now = Date.now();
   const last = lastTriggerMap.get(address);
-  if (last && Date.now() - last < CONTENT_DEDUP_MS) return;
-  lastTriggerMap.set(address, Date.now());
+  if (last && now - last < CONTENT_DEDUP_MS) return;
+
+  // Prune expired entries to prevent the map growing unbounded on long sessions.
+  for (const [key, ts] of lastTriggerMap) {
+    if (now - ts >= CONTENT_DEDUP_MS) lastTriggerMap.delete(key);
+  }
+  lastTriggerMap.set(address, now);
 
   const { x, y } = clampPosition(rawX, rawY);
 
