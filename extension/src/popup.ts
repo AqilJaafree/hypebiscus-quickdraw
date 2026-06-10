@@ -105,10 +105,26 @@ function init(): void {
     // The storage watcher above picks up the result.
     connectBtn.textContent = "Connecting…";
     connectBtn.disabled = true;
-    chrome.runtime.sendMessage({ type: "connect_wallet_injected" }).catch(() => {
-      // Background error (e.g. no active tab) — reset button
-      renderConnectBtn(currentWallet);
-    });
+    console.log("[QD popup] sending connect_wallet_injected");
+
+    chrome.runtime.sendMessage({ type: "connect_wallet_injected" })
+      .then((resp: { ok: boolean; data?: WalletState; error?: string } | undefined) => {
+        console.log("[QD popup] connect response:", resp);
+        if (!resp?.ok) {
+          const msg = resp?.error ?? "unknown error";
+          connectBtn.textContent = msg.slice(0, 28) + (msg.length > 28 ? "…" : "");
+          connectBtn.disabled = false;
+          setTimeout(() => renderConnectBtn(currentWallet), 2500);
+        } else if (resp.data) {
+          // Render immediately from the response — don't wait for storage.onChanged,
+          // which won't fire if the popup closed during the Phantom approval dialog.
+          renderConnectBtn(resp.data);
+        }
+      })
+      .catch((err: unknown) => {
+        console.error("[QD popup] sendMessage threw:", err);
+        renderConnectBtn(currentWallet);
+      });
   });
 
   // ── Async state load ───────────────────────────────────────────────────────
@@ -116,22 +132,22 @@ function init(): void {
 
   Promise.allSettled([
     sendBg<boolean>({ type: "get_detection_enabled" }),
-    sendBg<WalletState>({ type: "get_wallet" }),
-    chrome.storage.local.get("lastToken"),
+    chrome.storage.local.get(["wallet", "lastToken"]),
     chrome.storage.session.get("sessionStart"),
-  ]).then(([enabledResult, walletResult, lastTokenResult, sessionResult]) => {
+  ]).then(([enabledResult, storageResult, sessionResult]) => {
     if (enabledResult.status === "fulfilled") {
       isEnabled = enabledResult.value;
       renderStatus(isEnabled);
     }
 
-    if (walletResult.status === "fulfilled") {
-      renderConnectBtn(walletResult.value);
-    }
+    // Read wallet directly from storage to avoid the SW restart race where
+    // walletState is empty until loadWalletFromStorage() resolves.
+    const storage = storageResult.status === "fulfilled"
+      ? storageResult.value as { wallet?: WalletState; lastToken?: string }
+      : {};
+    if (storage.wallet) renderConnectBtn(storage.wallet);
 
-    const lastToken = lastTokenResult.status === "fulfilled"
-      ? (lastTokenResult.value as { lastToken?: string }).lastToken ?? null
-      : null;
+    const lastToken = storage.lastToken ?? null;
     lastSeenEl.textContent = lastToken
       ? `${lastToken.slice(0, 6)}…${lastToken.slice(-4)}`
       : "—";

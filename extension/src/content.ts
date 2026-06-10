@@ -77,53 +77,6 @@ async function triggerAddress(address: string, rawX: number, rawY: number): Prom
   } catch { /* worker not running — no narration */ }
 }
 
-// ── Wallet connection bridge ───────────────────────────────────────────────────
-// Extension popup can't see injected wallets (chrome-extension:// pages don't
-// receive wallet content scripts). The popup routes through here instead — this
-// content script runs on real web pages where window.phantom etc. are present.
-chrome.runtime.onMessage.addListener((
-  msg: { type: string },
-  _sender,
-  sendResponse: (r: { ok: boolean; address?: string; error?: string }) => void,
-) => {
-  if (msg.type !== "WALLET_CONNECT_REQUEST") return false;
-  connectInjectedWallet()
-    .then(address => sendResponse({ ok: true, address }))
-    .catch(err => sendResponse({ ok: false, error: (err as Error).message }));
-  return true; // signal async response
-});
-
-async function connectInjectedWallet(): Promise<string> {
-  const win = window as Record<string, unknown>;
-
-  type SolanaProvider = {
-    isPhantom?: boolean;
-    isSolflare?: boolean;
-    publicKey?: { toString(): string };
-    connect(): Promise<{ publicKey: { toString(): string } }>;
-  };
-
-  const phantom = (win.phantom as Record<string, unknown>)?.solana as SolanaProvider | undefined;
-  if (phantom?.isPhantom) {
-    const resp = await phantom.connect();
-    return resp.publicKey.toString();
-  }
-
-  const solflare = win.solflare as SolanaProvider | undefined;
-  if (solflare?.isSolflare) {
-    const resp = await solflare.connect();
-    return resp.publicKey?.toString() ?? solflare.publicKey!.toString();
-  }
-
-  const solana = win.solana as SolanaProvider | undefined;
-  if (solana) {
-    const resp = await solana.connect();
-    return resp.publicKey?.toString() ?? solana.publicKey!.toString();
-  }
-
-  throw new Error("No Solana wallet detected on this page. Install Phantom or Solflare, then refresh.");
-}
-
 // ── Selection detection ────────────────────────────────────────────────────────
 let debounce: ReturnType<typeof setTimeout> | null = null;
 const DEBOUNCE_MS = 350;

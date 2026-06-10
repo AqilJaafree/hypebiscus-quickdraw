@@ -380,24 +380,60 @@ async function handleMessage(msg: BgRequest, respond: (r: BgResponse) => void): 
     }
 
     if (msg.type === "connect_wallet_injected") {
-      // Extension popup windows have type "popup" — getLastFocused with
-      // windowTypes:["normal"] skips them and finds the real browser tab
-      // where window.phantom / window.solana are actually injected.
+      console.log("[QD bg] connect_wallet_injected received");
       const win = await chrome.windows.getLastFocused({ windowTypes: ["normal"] });
-      const [tab] = await chrome.tabs.query({ active: true, windowId: win.id! });
+      const allTabs = await chrome.tabs.query({ windowId: win.id });
+      // Prefer the active tab if it's http/https; otherwise take the first usable tab.
+      // chrome:// and chrome-extension:// pages can't receive scripting injection.
+      const isUsable = (t: chrome.tabs.Tab) => !!t.url?.match(/^https?:\/\//);
+      const activeTab = allTabs.find(t => t.active && isUsable(t));
+      const tab = activeTab ?? allTabs.find(isUsable);
+      console.log("[QD bg] using tab id:", tab?.id, tab?.url);
       if (!tab?.id) {
-        respond({ ok: false, error: "no_tab" });
+        respond({ ok: false, error: "Open any webpage (http/https) then try again." });
         return;
       }
-      const result = await chrome.tabs.sendMessage(
-        tab.id,
-        { type: "WALLET_CONNECT_REQUEST" },
-      ) as { ok: boolean; address?: string; error?: string };
-      if (!result.ok) {
-        respond({ ok: false, error: result.error ?? "Connection failed" });
+
+      // Inject wallet connect directly into the page's main world via the
+      // scripting API. This works even when the content script isn't loaded
+      // (e.g. tab pre-dates extension reload) and gives access to window.phantom
+      // / window.solana that wallets inject into the main world.
+      const results = await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        world: "MAIN",
+        func: async (): Promise<{ ok: boolean; address?: string; error?: string }> => {
+          const w = window as Record<string, unknown>;
+          type Provider = {
+            isPhantom?: boolean; isSolflare?: boolean;
+            publicKey?: { toString(): string };
+            connect(): Promise<{ publicKey: { toString(): string } }>;
+          };
+          const phantom = (w.phantom as Record<string, unknown>)?.solana as Provider | undefined;
+          if (phantom?.isPhantom) {
+            const r = await phantom.connect();
+            return { ok: true, address: r.publicKey.toString() };
+          }
+          const solflare = w.solflare as Provider | undefined;
+          if (solflare?.isSolflare) {
+            const r = await solflare.connect();
+            return { ok: true, address: r.publicKey?.toString() ?? solflare.publicKey!.toString() };
+          }
+          const solana = w.solana as Provider | undefined;
+          if (solana) {
+            const r = await solana.connect();
+            return { ok: true, address: r.publicKey?.toString() ?? solana.publicKey!.toString() };
+          }
+          return { ok: false, error: "No Solana wallet detected. Install Phantom or Solflare." };
+        },
+      });
+
+      const result = results[0]?.result as { ok: boolean; address?: string; error?: string } | undefined;
+      console.log("[QD bg] inject result:", result);
+      if (!result?.ok) {
+        respond({ ok: false, error: result?.error ?? "Wallet connect returned no result" });
         return;
       }
-      const w: WalletState = { address: result.address!, adapter: "phantom", connected: true };
+      const w: WalletState = { address: result.address!, adapter: "injected", connected: true };
       walletState = w;
       await chrome.storage.local.set({ wallet: w });
       respond({ ok: true, data: w });
