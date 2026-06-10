@@ -1,10 +1,7 @@
 import { sendBg } from "./shared";
 import type { WalletState } from "./types";
 
-const SOL_ADDR_RE = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
-
 function formatDuration(ms: number): string {
-
   const s = Math.floor(ms / 1000);
   if (s < 60) return `${s}s`;
   const m = Math.floor(s / 60);
@@ -64,14 +61,11 @@ function init(): void {
     });
   });
 
-  // ── Wallet connect ─────────────────────────────────────────────────────────
-  const connectBtn  = document.getElementById("connect-btn") as HTMLButtonElement;
-  const addrForm    = document.getElementById("addr-form") as HTMLElement;
-  const addrInput   = document.getElementById("addr-input") as HTMLInputElement;
-  const addrConfirm = document.getElementById("addr-confirm") as HTMLButtonElement;
-  const addrCancel  = document.getElementById("addr-cancel") as HTMLButtonElement;
-  const addrErr     = document.getElementById("addr-err") as HTMLElement;
-
+  // ── Wallet connect (storage-based) ─────────────────────────────────────────
+  // The popup fires the connect request and then watches chrome.storage.local
+  // for the wallet key. Background writes wallet to storage after the injected
+  // wallet connects — the popup updates whether it's still open or reopened.
+  const connectBtn = document.getElementById("connect-btn") as HTMLButtonElement;
   let currentWallet: WalletState = { address: null, adapter: null, connected: false };
 
   function renderConnectBtn(w: WalletState): void {
@@ -79,84 +73,43 @@ function init(): void {
     if (w.connected && w.address) {
       connectBtn.textContent = `${w.address.slice(0, 6)}…${w.address.slice(-4)}`;
       connectBtn.classList.add("connected");
+      connectBtn.disabled = false;
     } else {
       connectBtn.textContent = "Connect Wallet";
       connectBtn.classList.remove("connected");
-    }
-  }
-
-  function showForm(errMsg?: string): void {
-    addrForm.classList.add("visible");
-    addrInput.value = "";
-    if (errMsg) {
-      addrErr.textContent = errMsg;
-      addrErr.classList.add("visible");
-    } else {
-      addrErr.classList.remove("visible");
-    }
-    addrInput.focus();
-  }
-
-  function hideForm(): void {
-    addrForm.classList.remove("visible");
-  }
-
-  async function saveWallet(w: WalletState): Promise<void> {
-    await sendBg({ type: "set_wallet", wallet: w }).catch(() => {});
-    renderConnectBtn(w);
-  }
-
-  async function confirmAddress(): Promise<void> {
-    const addr = addrInput.value.trim();
-    if (!SOL_ADDR_RE.test(addr)) {
-      addrErr.textContent = "Invalid Solana address";
-      addrErr.classList.add("visible");
-      return;
-    }
-    const w: WalletState = { address: addr, adapter: "manual", connected: true };
-    await saveWallet(w);
-    hideForm();
-  }
-
-  connectBtn.addEventListener("click", async () => {
-    if (currentWallet.connected) {
-      const w: WalletState = { address: null, adapter: null, connected: false };
-      await saveWallet(w);
-      hideForm();
-      return;
-    }
-
-    // Background routes to content script on the active browser tab —
-    // background uses getLastFocused(windowTypes:["normal"]) to skip the
-    // extension popup window (type "popup") which has no injected wallets.
-    connectBtn.textContent = "Connecting…";
-    connectBtn.disabled = true;
-    try {
-      const w = await sendBg<WalletState>({ type: "connect_wallet_injected" });
-      renderConnectBtn(w);
-    } catch (err) {
-      const msg = (err as Error).message;
-      renderConnectBtn(currentWallet); // reset button text
-      if (msg === "no_tab" || msg.includes("Receiving end does not exist")) {
-        // No active web tab → paste manually
-        showForm("Open a web page first, then connect.");
-      } else if (msg.includes("User rejected") || msg.includes("cancelled")) {
-        // User dismissed Phantom popup — do nothing
-      } else {
-        // Wallet not installed or other error → offer manual entry
-        showForm(msg.length < 80 ? msg : "Wallet not found. Paste address instead.");
-      }
-    } finally {
       connectBtn.disabled = false;
     }
+  }
+
+  // Watch storage — background writes wallet here after injected wallet connects.
+  // This fires whether the popup is still open or was reopened after Phantom dialog.
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area !== "local" || !changes.wallet) return;
+    const w = (changes.wallet.newValue ?? { address: null, adapter: null, connected: false }) as WalletState;
+    renderConnectBtn(w);
   });
 
-  addrConfirm.addEventListener("click", () => { confirmAddress().catch(() => {}); });
-  addrInput.addEventListener("keydown", (e) => {
-    if (e.key === "Enter") confirmAddress().catch(() => {});
-    if (e.key === "Escape") hideForm();
+  connectBtn.addEventListener("click", () => {
+    if (currentWallet.connected) {
+      // Disconnect — write directly to storage, watcher updates the button
+      const w: WalletState = { address: null, adapter: null, connected: false };
+      chrome.storage.local.set({ wallet: w });
+      sendBg({ type: "set_wallet", wallet: w }).catch(() => {});
+      return;
+    }
+
+    // Fire connect request to background — don't await.
+    // Background finds the active browser tab (via getLastFocused windowTypes:["normal"]),
+    // tells its content script to call window.phantom.solana.connect(),
+    // then writes the wallet to chrome.storage.local.
+    // The storage watcher above picks up the result.
+    connectBtn.textContent = "Connecting…";
+    connectBtn.disabled = true;
+    chrome.runtime.sendMessage({ type: "connect_wallet_injected" }).catch(() => {
+      // Background error (e.g. no active tab) — reset button
+      renderConnectBtn(currentWallet);
+    });
   });
-  addrCancel.addEventListener("click", hideForm);
 
   // ── Async state load ───────────────────────────────────────────────────────
   let sessionIntervalId: ReturnType<typeof setInterval> | null = null;

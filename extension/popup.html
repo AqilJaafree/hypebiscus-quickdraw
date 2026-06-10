@@ -70,24 +70,6 @@
     #connect-btn.connected { background: #1a1a1a; color: #8bf542;
       border-color: #333; box-shadow: none; }
 
-    /* ── Address input form ─────────────────────────────────────────────────── */
-    #addr-form { display: none; flex-direction: column; gap: 4px; margin-top: 6px; }
-    #addr-form.visible { display: flex; }
-    #addr-input { background: #111; border: 1px solid #444; color: #fff;
-      font-family: inherit; font-size: 10px; padding: 5px 7px;
-      outline: none; width: 100%; }
-    #addr-input::placeholder { color: #444; }
-    #addr-input:focus { border-color: #f5e642; }
-    .addr-row { display: flex; gap: 4px; }
-    #addr-confirm { flex: 1; padding: 5px; background: #f5e642; color: #111;
-      font-size: 10px; font-weight: 700; font-family: inherit; cursor: pointer;
-      border: 1px solid #333; }
-    #addr-cancel { padding: 5px 8px; background: #222; color: #888;
-      font-size: 10px; font-family: inherit; cursor: pointer; border: 1px solid #333; }
-    #addr-cancel:hover { color: #aaa; }
-    #addr-err { font-size: 9px; color: #f54242; display: none; }
-    #addr-err.visible { display: block; }
-
     /* ── Footer ─────────────────────────────────────────────────────────────── */
     .footer-sep { height: 1px; background: #2e2e2e; }
     .footer { padding: 6px 9px; }
@@ -145,14 +127,6 @@
       <div class="section">
         <div class="section-label">LOGIN</div>
         <button id="connect-btn">Connect Wallet</button>
-        <div id="addr-form">
-          <input id="addr-input" type="text" placeholder="Paste Solana address…" spellcheck="false" />
-          <div class="addr-row">
-            <button id="addr-confirm">CONFIRM</button>
-            <button id="addr-cancel">✕</button>
-          </div>
-          <span id="addr-err">Invalid Solana address</span>
-        </div>
       </div>
 
     </div>
