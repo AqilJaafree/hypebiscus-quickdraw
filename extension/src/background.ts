@@ -229,6 +229,11 @@ chrome.runtime.onConnect.addListener((port) => {
   if (port.name !== "deep-analysis") return;
 
   port.onMessage.addListener(async (req: DeepPortRequest) => {
+    const controller = new AbortController();
+    // Abort the upstream SSE fetch when the popup disconnects — prevents orphaned
+    // worker sessions accumulating across re-analyzes.
+    port.onDisconnect.addListener(() => controller.abort());
+
     try {
       const resp = await fetch(`${WORKER_URL}/ai/deep`, {
         method: "POST",
@@ -238,6 +243,7 @@ chrome.runtime.onConnect.addListener((port) => {
           "Authorization": `Bearer ${EXTENSION_SECRET}`,
         },
         body: JSON.stringify(req),
+        signal: controller.signal,
       });
 
       if (!resp.ok || !resp.body) {
@@ -272,6 +278,7 @@ chrome.runtime.onConnect.addListener((port) => {
       }
       port.postMessage({ type: "done" } satisfies DeepPortMessage);
     } catch (err: unknown) {
+      if ((err as { name?: string }).name === "AbortError") return; // port closed, stop silently
       const msg = err instanceof Error ? err.message : "Analysis failed";
       port.postMessage({ type: "error", message: msg } satisfies DeepPortMessage);
     }

@@ -23,6 +23,7 @@ export function buildDeepPanel(
   el.innerHTML = buildDeepHTML("", true);
 
   let port: ReturnType<typeof chrome.runtime.connect> | null = null;
+  let runGeneration = 0; // incremented on each startAnalysis call to invalidate stale callbacks
 
   function setContent(text: string, analyzing: boolean, isError = false): void {
     const textEl = el.querySelector<HTMLDivElement>("#qd-deep-text");
@@ -40,6 +41,8 @@ export function buildDeepPanel(
   }
 
   function startAnalysis(): void {
+    const generation = ++runGeneration;
+
     if (port) {
       try { port.disconnect(); } catch { /* already closed */ }
       port = null;
@@ -54,6 +57,7 @@ export function buildDeepPanel(
     let accText = "";
 
     port.onMessage.addListener((msg: DeepPortMessage) => {
+      if (generation !== runGeneration) return; // stale run — a re-analyze was triggered
       if (msg.type === "chunk") {
         accText += msg.text;
         setContent(accText, true);
@@ -65,6 +69,7 @@ export function buildDeepPanel(
     });
 
     port.onDisconnect.addListener(() => {
+      if (generation !== runGeneration) return; // stale — don't overwrite the new run's UI
       if (accText) setContent(accText, false);
       else setContent("Analysis unavailable", false, true);
       port = null;
