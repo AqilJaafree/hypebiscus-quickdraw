@@ -4,25 +4,12 @@ import type { WalletState } from "./types";
 const SOL_ADDR_RE = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 
 function formatDuration(ms: number): string {
+
   const s = Math.floor(ms / 1000);
   if (s < 60) return `${s}s`;
   const m = Math.floor(s / 60);
   if (m < 60) return `${m}m`;
   return `${Math.floor(m / 60)}h ${m % 60}m`;
-}
-
-// Ask the active tab's content script to connect the injected wallet.
-// Content scripts run on real web pages where window.phantom etc. are injected.
-async function connectViaContentScript(): Promise<string> {
-  const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-  const tab = tabs[0];
-  if (!tab?.id) throw new Error("no_tab");
-
-  const result = await chrome.tabs.sendMessage(tab.id, { type: "WALLET_CONNECT_REQUEST" }) as
-    { ok: boolean; address?: string; error?: string };
-
-  if (!result.ok) throw new Error(result.error ?? "Connection failed");
-  return result.address!;
 }
 
 function init(): void {
@@ -139,13 +126,14 @@ function init(): void {
       return;
     }
 
-    // Try injected wallet via content script bridge (same idea as Rust webview bridge)
+    // Background routes to content script on the active browser tab —
+    // background uses getLastFocused(windowTypes:["normal"]) to skip the
+    // extension popup window (type "popup") which has no injected wallets.
     connectBtn.textContent = "Connecting…";
     connectBtn.disabled = true;
     try {
-      const address = await connectViaContentScript();
-      const w: WalletState = { address, adapter: "phantom", connected: true };
-      await saveWallet(w);
+      const w = await sendBg<WalletState>({ type: "connect_wallet_injected" });
+      renderConnectBtn(w);
     } catch (err) {
       const msg = (err as Error).message;
       renderConnectBtn(currentWallet); // reset button text

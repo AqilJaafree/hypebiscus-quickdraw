@@ -379,6 +379,31 @@ async function handleMessage(msg: BgRequest, respond: (r: BgResponse) => void): 
       return;
     }
 
+    if (msg.type === "connect_wallet_injected") {
+      // Extension popup windows have type "popup" — getLastFocused with
+      // windowTypes:["normal"] skips them and finds the real browser tab
+      // where window.phantom / window.solana are actually injected.
+      const win = await chrome.windows.getLastFocused({ windowTypes: ["normal"] });
+      const [tab] = await chrome.tabs.query({ active: true, windowId: win.id! });
+      if (!tab?.id) {
+        respond({ ok: false, error: "no_tab" });
+        return;
+      }
+      const result = await chrome.tabs.sendMessage(
+        tab.id,
+        { type: "WALLET_CONNECT_REQUEST" },
+      ) as { ok: boolean; address?: string; error?: string };
+      if (!result.ok) {
+        respond({ ok: false, error: result.error ?? "Connection failed" });
+        return;
+      }
+      const w: WalletState = { address: result.address!, adapter: "phantom", connected: true };
+      walletState = w;
+      await chrome.storage.local.set({ wallet: w });
+      respond({ ok: true, data: w });
+      return;
+    }
+
     if (msg.type === "quote") {
       const quote = await fetchQuoteFromWorker(msg.inputMint, msg.outputMint, msg.amountLamports);
       respond({ ok: true, data: quote });

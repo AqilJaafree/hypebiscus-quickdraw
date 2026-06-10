@@ -111,7 +111,8 @@ export type BgRequest =
   | { type: "get_skill_settings" }
   | { type: "set_skill_settings"; settings: SkillSettings }
   | { type: "quote"; inputMint: string; outputMint: string; amountLamports: number }
-  | { type: "swap_tx"; inputMint: string; outputMint: string; amountLamports: number; walletAddress: string };
+  | { type: "swap_tx"; inputMint: string; outputMint: string; amountLamports: number; walletAddress: string }
+  | { type: "connect_wallet_injected" };
 
 export type BgResponse<T = unknown> =
   | { ok: true; data: T }
