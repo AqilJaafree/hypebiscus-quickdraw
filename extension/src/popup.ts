@@ -1,5 +1,5 @@
-import { sendBg } from "./shared";
-import type { WalletState } from "./types";
+import { sendBg, esc } from "./shared";
+import type { WalletState, PortfolioItem } from "./types";
 
 function formatDuration(ms: number): string {
   const s = Math.floor(ms / 1000);
@@ -7,6 +7,49 @@ function formatDuration(ms: number): string {
   const m = Math.floor(s / 60);
   if (m < 60) return `${m}m`;
   return `${Math.floor(m / 60)}h ${m % 60}m`;
+}
+
+async function loadPortfolio(wallet: WalletState): Promise<void> {
+  const section = document.getElementById("portfolio-section") as HTMLElement;
+  const sep = document.getElementById("portfolio-sep") as HTMLElement;
+  const list = document.getElementById("portfolio-list") as HTMLElement;
+  const total = document.getElementById("portfolio-total") as HTMLElement;
+
+  if (!wallet.connected) {
+    section.style.display = "none";
+    sep.style.display = "none";
+    return;
+  }
+
+  section.style.display = "";
+  sep.style.display = "";
+  list.innerHTML = `<div class="portfolio-row"><span class="portfolio-sym">Loading…</span></div>`;
+
+  try {
+    const items = await sendBg<PortfolioItem[]>({ type: "get_portfolio" });
+
+    const sorted = items
+      .filter(i => (i.valueUsd ?? 0) > 0.01)
+      .sort((a, b) => (b.valueUsd ?? 0) - (a.valueUsd ?? 0))
+      .slice(0, 8);
+
+    const totalUsd = items.reduce((s, i) => s + (i.valueUsd ?? 0), 0);
+
+    list.innerHTML = sorted.map(i =>
+      `<div class="portfolio-row">
+        <span class="portfolio-sym">${esc(i.symbol)}</span>
+        <span class="portfolio-val">$${(i.valueUsd ?? 0).toFixed(2)}</span>
+      </div>`,
+    ).join("") || `<div class="portfolio-row"><span class="portfolio-sym">No tokens found</span></div>`;
+
+    total.innerHTML = `
+      <span class="stat-key">Total</span>
+      <span class="stat-val">$${totalUsd.toFixed(2)}</span>`;
+  } catch {
+    list.innerHTML = `<div class="portfolio-row"><span class="portfolio-sym">—</span></div>`;
+    sep.style.display = "none";
+    section.style.display = "none";
+  }
 }
 
 function init(): void {
@@ -87,6 +130,7 @@ function init(): void {
     if (area !== "local" || !changes.wallet) return;
     const w = (changes.wallet.newValue ?? { address: null, adapter: null, connected: false }) as WalletState;
     renderConnectBtn(w);
+    loadPortfolio(w);
   });
 
   connectBtn.addEventListener("click", () => {
@@ -145,7 +189,10 @@ function init(): void {
     const storage = storageResult.status === "fulfilled"
       ? storageResult.value as { wallet?: WalletState; lastToken?: string }
       : {};
-    if (storage.wallet) renderConnectBtn(storage.wallet);
+    if (storage.wallet) {
+      renderConnectBtn(storage.wallet);
+      loadPortfolio(storage.wallet);
+    }
 
     const lastToken = storage.lastToken ?? null;
     lastSeenEl.textContent = lastToken

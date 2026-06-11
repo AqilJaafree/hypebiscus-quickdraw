@@ -5,6 +5,7 @@ import type {
   BgRequest, BgResponse, SafetyScore, TokenData, TokenPrice,
   WalletState, PriceAlert, WatchItem, WatchItemWithPrice, SkillSettings,
   DeepPortRequest, DeepPortMessage, AdapterQuote, MultiAdapterQuote,
+  PortfolioItem,
 } from "./types";
 import { DEFAULT_SKILL_SETTINGS } from "./types";
 import type { TweetContext } from "./tweet-context";
@@ -541,6 +542,43 @@ async function handleMessage(msg: BgRequest, respond: (r: BgResponse) => void): 
     if (msg.type === "swap_tx") {
       const txBase64 = await buildSwapTxFromWorker(msg.inputMint, msg.outputMint, msg.amountLamports, msg.walletAddress);
       respond({ ok: true, data: txBase64 });
+      return;
+    }
+
+    if (msg.type === "get_portfolio") {
+      if (!walletState.connected || !walletState.address) {
+        respond({ ok: false, error: "No wallet connected" });
+        return;
+      }
+
+      // Check 30s session cache keyed by wallet address
+      const cacheKey = `portfolio_${walletState.address}`;
+      const cached = await chrome.storage.session.get(cacheKey);
+      if (cached[cacheKey]) {
+        const entry = cached[cacheKey] as { data: PortfolioItem[]; expiresAt: number };
+        if (Date.now() < entry.expiresAt) {
+          respond({ ok: true, data: entry.data });
+          return;
+        }
+      }
+
+      const resp = await fetch(
+        `${WORKER_URL}/defi/helius/portfolio?wallet=${encodeURIComponent(walletState.address)}`,
+        {
+          headers: {
+            "X-Quickdraw-Client": "extension",
+            "Authorization": `Bearer ${EXTENSION_SECRET}`,
+          },
+        },
+      );
+      if (!resp.ok) throw new Error("Portfolio fetch failed");
+      const data = await resp.json() as PortfolioItem[];
+
+      await chrome.storage.session.set({
+        [cacheKey]: { data, expiresAt: Date.now() + 30_000 },
+      });
+
+      respond({ ok: true, data });
       return;
     }
 

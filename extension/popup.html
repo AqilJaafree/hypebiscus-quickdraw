@@ -70,6 +70,10 @@
     #connect-btn.connected { background: #1a1a1a; color: #8bf542;
       border-color: #333; box-shadow: none; }
 
+    .portfolio-row { display:flex; justify-content:space-between; align-items:center; padding:1px 4px; }
+    .portfolio-sym { font-size:10px; color:#888; }
+    .portfolio-val { font-size:10px; font-weight:700; color:#fff; }
+
     /* ── Footer ─────────────────────────────────────────────────────────────── */
     .footer-sep { height: 1px; background: #2e2e2e; }
     .footer { padding: 6px 9px; }
@@ -127,6 +131,14 @@
       <div class="section">
         <div class="section-label">LOGIN</div>
         <button id="connect-btn">Connect Wallet</button>
+      </div>
+
+      <div class="sep" id="portfolio-sep" style="display:none;"></div>
+
+      <div class="section" id="portfolio-section" style="display:none;">
+        <div class="section-label">PORTFOLIO</div>
+        <div id="portfolio-list" style="display:flex;flex-direction:column;gap:2px;"></div>
+        <div id="portfolio-total" class="stat-row" style="border-top:1px solid #2a2a2a;margin-top:4px;padding-top:4px;"></div>
       </div>
 
     </div>
