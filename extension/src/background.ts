@@ -1,9 +1,10 @@
 import { fetchToken } from "./jupiter-client";
 import { alertShouldFire, alertShouldRearm } from "./skills/alert";
+import { rankQuotes } from "./multi-quote-utils";
 import type {
   BgRequest, BgResponse, SafetyScore, TokenData, TokenPrice,
   WalletState, PriceAlert, WatchItem, WatchItemWithPrice, SkillSettings,
-  DeepPortRequest, DeepPortMessage,
+  DeepPortRequest, DeepPortMessage, AdapterQuote, MultiAdapterQuote,
 } from "./types";
 import { DEFAULT_SKILL_SETTINGS } from "./types";
 
@@ -102,6 +103,39 @@ async function buildSwapTxFromWorker(
   if (!resp.ok) throw new Error("Swap build failed");
   const data = await resp.json() as { swapTransaction: string };
   return data.swapTransaction;
+}
+
+async function fetchRaydiumQuote(
+  inputMint: string,
+  outputMint: string,
+  amountLamports: number,
+): Promise<AdapterQuote | null> {
+  try {
+    const params = new URLSearchParams({
+      inputMint,
+      outputMint,
+      amount: String(amountLamports),
+      slippageBps: "50",
+      txVersion: "V0",
+    });
+    const resp = await fetch(
+      `https://transaction-v1.raydium.io/compute/swap-base-in?${params}`,
+    );
+    if (!resp.ok) return null;
+    const data = await resp.json() as {
+      success: boolean;
+      data?: { outputAmount: string; priceImpactPct: number };
+    };
+    if (!data.success || !data.data) return null;
+    return {
+      adapter: "raydium",
+      outAmount: data.data.outputAmount,
+      priceImpactPct: data.data.priceImpactPct,
+      routeLabel: "Raydium",
+    };
+  } catch {
+    return null;
+  }
 }
 
 // ── Price alert polling ────────────────────────────────────────────────────────
@@ -444,6 +478,43 @@ async function handleMessage(msg: BgRequest, respond: (r: BgResponse) => void): 
       walletState = w;
       await chrome.storage.local.set({ wallet: w });
       respond({ ok: true, data: w });
+      return;
+    }
+
+    if (msg.type === "quote_multi") {
+      const [jupiterResult, raydiumResult] = await Promise.allSettled([
+        fetchQuoteFromWorker(msg.inputMint, msg.outputMint, msg.amountLamports),
+        fetchRaydiumQuote(msg.inputMint, msg.outputMint, msg.amountLamports),
+      ]);
+
+      const quotes: AdapterQuote[] = [];
+
+      if (jupiterResult.status === "fulfilled") {
+        const jup = jupiterResult.value as {
+          outAmount: string;
+          priceImpactPct: number;
+          routePlan?: Array<{ swapInfo: { label: string } }>;
+        };
+        quotes.push({
+          adapter: "jupiter",
+          outAmount: jup.outAmount ?? "0",
+          priceImpactPct: jup.priceImpactPct ?? 0,
+          routeLabel: jup.routePlan?.[0]?.swapInfo?.label ?? "Jupiter",
+        });
+      }
+
+      if (raydiumResult.status === "fulfilled" && raydiumResult.value) {
+        quotes.push(raydiumResult.value);
+      }
+
+      if (!quotes.length) {
+        respond({ ok: false, error: "No quotes available" });
+        return;
+      }
+
+      const ranked = rankQuotes(quotes);
+      const result: MultiAdapterQuote = { best: ranked[0], all: ranked };
+      respond({ ok: true, data: result });
       return;
     }
 

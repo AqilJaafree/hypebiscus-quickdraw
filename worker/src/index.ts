@@ -19,6 +19,7 @@
  *   GET  /defi/jupiter/price         → Jupiter price API
  *   GET  /defi/safety/rugcheck       → RugCheck report proxy
  *   GET  /defi/helius/token          → Helius DAS token metadata
+ *   GET  /defi/helius/portfolio      → Helius DAS fungible token holdings
  */
 
 export interface Env {
@@ -250,6 +251,65 @@ async function handleHeliusToken(url: URL, env: Env): Promise<Response> {
   return json(data, upstream.status);
 }
 
+async function handleHeliusPortfolio(url: URL, env: Env): Promise<Response> {
+  const wallet = url.searchParams.get("wallet");
+  if (!wallet) return err("wallet param required");
+
+  const upstream = await fetch(
+    `https://mainnet.helius-rpc.com/?api-key=${env.HELIUS_API_KEY}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: "portfolio",
+        method: "getAssetsByOwner",
+        params: {
+          ownerAddress: wallet,
+          page: 1,
+          limit: 100,
+          displayOptions: { showFungible: true, showNativeBalance: false },
+        },
+      }),
+    },
+  );
+
+  if (!upstream.ok) return err("Helius error", 502);
+
+  const raw = await upstream.json() as {
+    result?: {
+      items?: Array<{
+        id: string;
+        interface: string;
+        content: { metadata: { symbol?: string } };
+        token_info?: {
+          balance: number;
+          decimals: number;
+          price_info?: { price_per_token?: number };
+        };
+      }>;
+    };
+  };
+
+  const items = (raw.result?.items ?? [])
+    .filter(a => a.interface === "FungibleToken" && a.token_info)
+    .map(a => {
+      const ti = a.token_info!;
+      const priceUsd = ti.price_info?.price_per_token ?? null;
+      const balance = ti.balance / Math.pow(10, ti.decimals);
+      return {
+        mint: a.id,
+        symbol: a.content.metadata.symbol ?? a.id.slice(0, 6),
+        balance,
+        decimals: ti.decimals,
+        priceUsd,
+        valueUsd: priceUsd !== null ? balance * priceUsd : null,
+      };
+    });
+
+  return json(items);
+}
+
 async function handleAiDeepExtension(req: Request, env: Env): Promise<Response> {
   const body = await req.json<Record<string, unknown>>();
 
@@ -440,6 +500,12 @@ export default {
       }
       if (url.pathname === "/ai/deep" && req.method === "POST") {
         return handleAiDeepExtension(req, env);
+      }
+      if (url.pathname === "/defi/jupiter/quote") {
+        return handleJupiterQuote(url);
+      }
+      if (url.pathname === "/defi/helius/portfolio") {
+        return handleHeliusPortfolio(url, env);
       }
       return err("Not found", 404);
     }
