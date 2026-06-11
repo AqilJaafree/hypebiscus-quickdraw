@@ -7,6 +7,7 @@ import type {
   DeepPortRequest, DeepPortMessage, AdapterQuote, MultiAdapterQuote,
 } from "./types";
 import { DEFAULT_SKILL_SETTINGS } from "./types";
+import type { TweetContext } from "./tweet-context";
 
 declare const __WORKER_URL__: string;
 declare const __EXTENSION_SECRET__: string;
@@ -200,19 +201,32 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
 chrome.runtime.onConnect.addListener((port) => {
   if (port.name !== "narration") return;
 
-  port.onMessage.addListener(async (req: {
-    address: string;
-    safety: { score: number; label: string; summary: string };
-    price: { usd: number; symbol: string } | null;
-  }) => {
+  port.onMessage.addListener(async (rawMsg: unknown) => {
+    const req = rawMsg as {
+      address: string;
+      safety: { score: number; label: string; summary: string };
+      price: { usd: number; symbol: string } | null;
+      tweetContext?: TweetContext | null;
+    };
     try {
       const system = "You are a concise DeFi analyst for Solana traders. Write 1-2 sentences about the token's risk and key facts. Be direct. No disclaimers.";
+
+      let tweetContextStr = "";
+      if (req.tweetContext) {
+        const parts: string[] = [];
+        if (req.tweetContext.authorHandle) parts.push(`Author: @${req.tweetContext.authorHandle}${req.tweetContext.verified ? " (verified)" : ""}`);
+        if (req.tweetContext.likes !== null) parts.push(`Likes: ${req.tweetContext.likes.toLocaleString()}`);
+        if (req.tweetContext.retweets !== null) parts.push(`Retweets: ${req.tweetContext.retweets.toLocaleString()}`);
+        if (req.tweetContext.tweetText) parts.push(`Tweet: "${req.tweetContext.tweetText.slice(0, 200)}"`);
+        if (parts.length) tweetContextStr = `\nSocial context:\n${parts.join("\n")}`;
+      }
+
       const user = [
         `Token address: ${req.address}`,
         `Safety score: ${req.safety.score}/100 (${req.safety.label})`,
         `Details: ${req.safety.summary}`,
         req.price ? `Price: $${req.price.usd.toFixed(6)} (${req.price.symbol})` : "Price: unavailable",
-      ].join("\n");
+      ].join("\n") + tweetContextStr;
 
       const resp = await fetch(`${WORKER_URL}/ai/fast`, {
         method: "POST",
