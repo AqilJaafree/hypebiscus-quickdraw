@@ -1,13 +1,10 @@
 import { detectInSelection, detectInText } from "./detector";
 import { createPopup, removePopup, PopupController } from "./popup-ui";
-import { buildSwapPanel } from "./swap-panel";
-import { getWallet, connectWallet, injectWalletBridge } from "./wallet";
-import { streamNarration } from "./worker-client";
 import { sendBg } from "./shared";
-import type { TokenData, WalletState } from "./types";
+import type { TokenData } from "./types";
 
 function clampPosition(x: number, y: number): { x: number; y: number } {
-  const POP_W = 288, POP_H = 240;
+  const POP_W = 264, POP_H = 160;
   const cx = x + POP_W > window.innerWidth  ? x - POP_W - 8 : x + 16;
   const cy = y + POP_H > window.innerHeight ? y - POP_H - 8 : y + 8;
   return { x: Math.max(8, cx), y: Math.max(8, cy) };
@@ -17,13 +14,24 @@ function clampPosition(x: number, y: number): { x: number; y: number } {
 let activeController: PopupController | null = null;
 let detectionEnabled = true;
 
+const lastTriggerMap = new Map<string, number>();
+const CONTENT_DEDUP_MS = 30_000;
+
 async function triggerAddress(address: string, rawX: number, rawY: number): Promise<void> {
   if (!detectionEnabled) return;
 
+  const now = Date.now();
+  const last = lastTriggerMap.get(address);
+  if (last && now - last < CONTENT_DEDUP_MS) return;
+
+  // Prune expired entries to prevent the map growing unbounded on long sessions.
+  for (const [key, ts] of lastTriggerMap) {
+    if (now - ts >= CONTENT_DEDUP_MS) lastTriggerMap.delete(key);
+  }
+  lastTriggerMap.set(address, now);
+
   const { x, y } = clampPosition(rawX, rawY);
 
-  // Show loading popup immediately — user sees feedback right away
-  let walletState: WalletState = { address: null, adapter: null, connected: false };
   let tokenData: TokenData | null = null;
 
   const controller = createPopup({
@@ -32,72 +40,47 @@ async function triggerAddress(address: string, rawX: number, rawY: number): Prom
     y,
     callbacks: {
       onDismiss: () => { activeController = null; },
-      onSwapClick: async () => {
-        let w = walletState;
-        if (!w.connected) {
-          try {
-            await injectWalletBridge();
-            w = await connectWallet();
-            walletState = w;
-          } catch {
-            controller.showError("No wallet found. Install Phantom or Backpack.");
-            return;
-          }
-        } else {
-          await injectWalletBridge();
-        }
-        const panel = buildSwapPanel(address, w, {
-          onSuccess: (sig) => {
-            controller.showError(`✓ Swapped! ${sig.slice(0, 8)}…`);
-          },
-          onError: (msg) => controller.showError(msg),
-          onCancel: () => removePopup(),
-        });
-        controller.mountSwapPanel(panel);
-      },
-      onConnectWallet: async () => {
-        try {
-          const w = await connectWallet();
-          walletState = w;
-          if (tokenData) controller.showToken(tokenData.safety, tokenData.price, w);
-        } catch {
-          controller.showError("No wallet found.");
-        }
+      onGear: () => { chrome.runtime.sendMessage({ type: "OPEN_POPUP" }).catch(() => {}); },
+      onBuy: () => {
+        const ticker = tokenData?.price?.symbol;
+        window.open(
+          ticker ? `https://jup.ag/swap/SOL-${ticker}` : `https://jup.ag/swap/SOL-${address}`,
+          "_blank",
+        );
       },
     },
   });
 
   activeController = controller;
 
-  // Fetch wallet + token data in parallel
-  const [wallet, fetchResult] = await Promise.allSettled([
-    sendBg<WalletState>({ type: "get_wallet" }),
+  const [fetchResult] = await Promise.allSettled([
     sendBg<TokenData>({ type: "fetch_token", address }),
   ]);
 
-  if (wallet.status === "fulfilled") walletState = wallet.value;
-
   if (fetchResult.status === "rejected") {
     const msg = fetchResult.reason instanceof Error ? fetchResult.reason.message : "";
-    if (msg === "dedup") {
-      // Already shown recently — close silently
-      removePopup(); activeController = null; return;
-    }
-    controller.showError(msg || "Token not found on Jupiter");
+    if (msg === "dedup") { removePopup(); activeController = null; return; }
+    controller.showError(msg || "Token not found");
     return;
   }
 
   tokenData = fetchResult.value;
-  controller.showToken(tokenData.safety, tokenData.price, walletState);
+  controller.showToken(tokenData.safety, tokenData.price);
 
-  streamNarration(
-    address,
-    tokenData.safety,
-    tokenData.price,
-    (delta) => controller.appendNarration(delta),
-  ).catch(() => {
-    controller.appendNarration(" (narration unavailable)");
-  });
+  // Stream Haiku analysis via background port — avoids ad-blocker blocks on content script fetches
+  try {
+    const port = chrome.runtime.connect({ name: "narration" });
+    port.onMessage.addListener((msg: { type: string; text?: string }) => {
+      if (msg.type === "chunk" && msg.text) controller.appendNarration(msg.text);
+      if (msg.type === "done") port.disconnect();
+    });
+    port.onDisconnect.addListener(() => {});
+    port.postMessage({
+      address,
+      safety: { score: tokenData.safety.score, label: tokenData.safety.label, summary: tokenData.safety.summary },
+      price: tokenData.price ? { usd: tokenData.price.usd, symbol: tokenData.price.symbol } : null,
+    });
+  } catch { /* worker not running — no narration */ }
 }
 
 // ── Selection detection ────────────────────────────────────────────────────────
@@ -114,20 +97,18 @@ function onSelectionChange(): void {
   }, DEBOUNCE_MS);
 }
 
-// Use capture:true so page-level stopPropagation can't block us
 document.addEventListener("mouseup", onSelectionChange, true);
 document.addEventListener("keyup", (e) => { if (e.shiftKey) onSelectionChange(); }, true);
 
-// ── Dismiss ────────────────────────────────────────────────────────────────────
-document.addEventListener("keydown", (e) => { if (e.key === "Escape") { removePopup(); activeController = null; } });
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") { removePopup(); activeController = null; }
+});
 document.addEventListener("mousedown", (e) => {
   const host = document.getElementById("quickdraw-host");
   if (host && !host.contains(e.target as Node)) { removePopup(); activeController = null; }
 });
 
 // ── MutationObserver ───────────────────────────────────────────────────────────
-// Batched: collect mutations for 500ms then process once to avoid flooding on
-// address-heavy pages like Solscan, Jupiter, and Meteora.
 let mutationQueue: MutationRecord[] = [];
 let mutationTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -136,7 +117,7 @@ function processMutations(): void {
   const batch = mutationQueue;
   mutationQueue = [];
   for (const mutation of batch) {
-    for (const node of mutation.addedNodes) {
+    for (const node of Array.from(mutation.addedNodes)) {
       if (node.nodeType !== Node.TEXT_NODE) continue;
       const text = (node as Text).textContent ?? "";
       if (text.length < 32) continue;
@@ -148,7 +129,7 @@ function processMutations(): void {
       const first = detections[0];
       if (first.type === "address") {
         triggerAddress(first.value, rect.left, rect.bottom);
-        return; // one trigger per batch — avoid flooding
+        return;
       }
     }
   }

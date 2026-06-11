@@ -1,43 +1,159 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-  <meta charset="utf-8">
+  <meta charset="UTF-8" />
+  <title>Quickdraw</title>
   <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    body {
-      width: 240px;
-      background: #181818;
-      font-family: 'Space Mono', monospace;
-      color: #F5F0E8;
-      padding: 16px;
-    }
-    .logo { color: #F5E642; font-size: 11px; font-weight: 700; letter-spacing: 1px; margin-bottom: 12px; }
-    .row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
-    .label { color: #555; font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; }
-    #wallet-status { font-size: 11px; font-weight: 700; }
-    .toggle-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
-    input[type=checkbox] { width: 16px; height: 16px; cursor: pointer; accent-color: #F5E642; }
-    button {
-      width: 100%; padding: 8px; font-size: 10px; font-weight: 700; letter-spacing: 0.06em;
-      background: #F5E642; color: #000; border: 1.5px solid #000;
-      box-shadow: 2px 2px 0 #000; cursor: pointer; font-family: inherit;
-    }
-    button:hover { background: #ffe000; }
-    .sep { border-top: 1px solid #222; margin: 12px 0; }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { width: 260px; background: #181818; font-family: 'Space Mono', monospace;
+      color: #fff; font-size: 12px; overflow: hidden; }
+
+    /* ── Header ─────────────────────────────────────────────────────────────── */
+    .s-header { display: flex; justify-content: space-between; align-items: center;
+      padding: 12px 9px; background: #111; }
+    .s-title { color: #f5e642; font-size: 12px; font-weight: 700; letter-spacing: 2px; }
+    .s-close { background: none; border: none; color: #555; font-size: 13px;
+      cursor: pointer; font-family: Inter, sans-serif; line-height: 1; }
+    .s-close:hover { color: #888; }
+    .header-line { height: 2px; background: #111; }
+
+    /* ── Tabs ───────────────────────────────────────────────────────────────── */
+    .qd-tabs { display: flex; }
+    .qd-tab { flex: 1; padding: 7px 0; font-size: 10px; font-weight: 700;
+      letter-spacing: 1px; cursor: pointer; border: none; font-family: inherit;
+      background: #181818; color: #555; border-bottom: 2px solid transparent; }
+    .qd-tab.active { background: #2a2a2a; color: #fff; border-bottom: 2px solid #f5e642; }
+    .tabs-line { height: 1px; background: #2e2e2e; }
+
+    /* ── Panes ──────────────────────────────────────────────────────────────── */
+    .qd-pane { display: none; }
+    .qd-pane.active { display: block; }
+    .content { padding: 12px; display: flex; flex-direction: column; gap: 12px; }
+
+    /* ── Status row ─────────────────────────────────────────────────────────── */
+    .status-row { display: flex; justify-content: space-between; align-items: center; }
+    .status-left { display: flex; align-items: center; gap: 6px; }
+    .status-dot { width: 8px; height: 8px; border-radius: 50%; background: #8bf542;
+      flex-shrink: 0; }
+    .status-dot.paused { background: #555; }
+    #status-text { font-size: 13px; font-weight: 700; }
+    .pause-btn { background: #222; border: 1px solid #444; color: #888; font-size: 11px;
+      font-family: inherit; padding: 3px 10px; cursor: pointer; }
+    .pause-btn:hover { color: #aaa; }
+
+    /* ── Separator ──────────────────────────────────────────────────────────── */
+    .sep { height: 1px; background: #2e2e2e; }
+
+    /* ── Section ────────────────────────────────────────────────────────────── */
+    .section { display: flex; flex-direction: column; gap: 4px; }
+    .section-label { font-size: 10px; font-weight: 700; color: #666; letter-spacing: 2px; }
+    .stat-row { display: flex; justify-content: space-between; align-items: center;
+      padding: 0 4px; }
+    .stat-row.bordered { border-bottom: 1px solid #2a2a2a; }
+    .stat-key { font-size: 10px; color: #666; }
+    .stat-val { font-size: 11px; font-weight: 700; color: #fff; }
+
+    /* ── AI toggle ──────────────────────────────────────────────────────────── */
+    .ai-toggle { display: flex; gap: 2px; }
+    .ai-btn { flex: 1; padding: 6px 4px; font-size: 10px; font-weight: normal;
+      font-family: inherit; cursor: pointer; border: 1px solid #444;
+      background: #282828; color: #666; }
+    .ai-btn.active { background: #f5e642; color: #111; font-weight: 700;
+      border-color: #333; }
+
+    /* ── Connect button ─────────────────────────────────────────────────────── */
+    #connect-btn { width: 100%; padding: 7px; background: #f5e642; color: #111;
+      font-size: 11px; font-weight: 700; font-family: inherit; cursor: pointer;
+      border: 2px solid #333; box-shadow: 2px 2px 0 #333;
+      letter-spacing: 0.04em; }
+    #connect-btn:hover { filter: brightness(1.05); }
+    #connect-btn.connected { background: #1a1a1a; color: #8bf542;
+      border-color: #333; box-shadow: none; }
+
+    /* ── Footer ─────────────────────────────────────────────────────────────── */
+    .footer-sep { height: 1px; background: #2e2e2e; }
+    .footer { padding: 6px 9px; }
+    .footer-ver { font-size: 10px; color: #333; }
   </style>
 </head>
 <body>
-  <div class="logo">⚡ QUICKDRAW</div>
-  <div class="row">
-    <span class="label">Wallet</span>
-    <span id="wallet-status">Loading…</span>
+  <div class="s-header">
+    <span class="s-title">QUICKDRAW</span>
+    <button class="s-close" id="close-btn">✕</button>
   </div>
-  <div class="sep"></div>
-  <div class="toggle-row">
-    <span class="label">Detection active</span>
-    <input type="checkbox" id="detection-toggle" checked />
+  <div class="header-line"></div>
+
+  <div class="qd-tabs">
+    <button class="qd-tab active" id="tab-state">STATE</button>
+    <button class="qd-tab" id="tab-skills">SKILLS</button>
   </div>
-  <button id="connect-btn">Connect Wallet</button>
-  <script src="dist/popup.js"></script>
+  <div class="tabs-line"></div>
+
+  <!-- STATE pane -->
+  <div class="qd-pane active" id="pane-state">
+    <div class="content">
+
+      <div class="status-row">
+        <div class="status-left">
+          <div class="status-dot" id="status-dot"></div>
+          <span id="status-text">ACTIVE</span>
+        </div>
+        <button class="pause-btn" id="pause-btn">Pause</button>
+      </div>
+
+      <div class="sep"></div>
+
+      <div class="section">
+        <div class="section-label">STATS</div>
+        <div class="stat-row bordered">
+          <span class="stat-key">Last seen</span>
+          <span class="stat-val" id="last-seen">—</span>
+        </div>
+        <div class="stat-row">
+          <span class="stat-key">Session</span>
+          <span class="stat-val" id="session-time">—</span>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="section-label">AI MODE</div>
+        <div class="ai-toggle">
+          <button class="ai-btn active" id="ai-auto">Auto</button>
+          <button class="ai-btn" id="ai-cloud">Cloud</button>
+          <button class="ai-btn" id="ai-local">Local</button>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="section-label">LOGIN</div>
+        <button id="connect-btn">Connect Wallet</button>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- SKILLS pane -->
+  <div class="qd-pane" id="pane-skills">
+    <div class="content">
+      <div class="section">
+        <div class="section-label">AI NARRATION</div>
+        <div class="stat-row">
+          <span class="stat-key">Stream analysis on detect</span>
+          <span class="stat-val" id="ai-narration-status">ON</span>
+        </div>
+      </div>
+      <div style="font-size:9px;color:#333;line-height:1.6;">
+        Quickdraw streams a 1–2 sentence Haiku analysis for each detected token.
+        Requires the worker to be running.
+      </div>
+    </div>
+  </div>
+
+  <div class="footer-sep"></div>
+  <div class="footer">
+    <span class="footer-ver">v0.1.0</span>
+  </div>
+
+  <script type="module" src="dist/popup.js"></script>
 </body>
 </html>

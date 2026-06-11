@@ -1,6 +1,5 @@
 import type { SwapQuote, WalletState } from "./types";
 import { fetchSwapQuote, buildSwapTransaction } from "./jupiter-client";
-import { signAndSend } from "./wallet";
 
 const SOL_MINT = "So11111111111111111111111111111111111111112";
 const LAMPORTS_PER_SOL = 1_000_000_000;
@@ -9,6 +8,7 @@ export interface SwapPanelCallbacks {
   onSuccess: (signature: string) => void;
   onError: (msg: string) => void;
   onCancel: () => void;
+  signAndSend?: (txBase64: string) => Promise<{ signature: string }>;
 }
 
 export function buildSwapPanel(
@@ -54,7 +54,8 @@ export function buildSwapPanel(
     render({ loading: false, quote, error: null, confirming: true });
     try {
       const txBase64 = await buildSwapTransaction(quote, wallet.address);
-      const { signature } = await signAndSend(txBase64);
+      if (!callbacks.signAndSend) throw new Error("signAndSend not provided");
+      const { signature } = await callbacks.signAndSend(txBase64);
       callbacks.onSuccess(signature);
     } catch (err: unknown) {
       render({ loading: false, quote, error: err instanceof Error ? err.message : "Swap failed", confirming: false });

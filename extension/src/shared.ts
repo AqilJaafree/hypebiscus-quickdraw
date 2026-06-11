@@ -17,6 +17,18 @@ export function sendBg<T>(msg: BgRequest): Promise<T> {
   });
 }
 
+// ─────────────────────── HTML escaping ───────────────────────────────────────
+
+/** Escape a string for safe interpolation into an HTML template literal. */
+export function esc(value: string | number | null | undefined): string {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
 // ─────────────────────── Safety score constants ──────────────────────────────
 
 export const SCORE_THRESHOLDS = {

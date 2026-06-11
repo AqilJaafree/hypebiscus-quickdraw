@@ -1,57 +1,86 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { fetchTokenSafety, fetchTokenPrice, fetchSwapQuote } from "../jupiter-client";
+import { fetchToken, fetchSwapQuote } from "../jupiter-client";
 
 const mockFetch = vi.fn();
 vi.stubGlobal("fetch", mockFetch);
 
 beforeEach(() => mockFetch.mockReset());
 
-describe("fetchTokenSafety", () => {
-  it("returns null when token not found", async () => {
+describe("fetchToken", () => {
+  it("returns null when token not in results", async () => {
     mockFetch.mockResolvedValue({ ok: true, json: async () => [] });
-    const result = await fetchTokenSafety("someAddress123");
+    const result = await fetchToken("someAddress123");
     expect(result).toBeNull();
   });
 
-  it("returns parsed token when found", async () => {
+  it("returns null when id does not match address", async () => {
     mockFetch.mockResolvedValue({
       ok: true,
-      json: async () => [{ organicScore: 82, isVerified: true, audit: { isSus: false } }],
+      json: async () => [{ id: "differentAddress", organicScore: 82, isVerified: true, audit: { isSus: false } }],
     });
-    const result = await fetchTokenSafety("someAddress123");
+    const result = await fetchToken("someAddress123");
+    expect(result).toBeNull();
+  });
+
+  it("returns safety score SAFE for organicScore >= 80", async () => {
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: async () => [{
+        id: "someAddress123",
+        organicScore: 82,
+        isVerified: true,
+        audit: { isSus: false, mintAuthorityDisabled: true, freezeAuthorityDisabled: true },
+        symbol: "TST",
+        name: "Test Token",
+      }],
+    });
+    const result = await fetchToken("someAddress123");
     expect(result).not.toBeNull();
-    expect(result!.score).toBe(82);
-    expect(result!.label).toBe("SAFE");
+    expect(result!.safety.score).toBe(82);
+    expect(result!.safety.label).toBe("SAFE");
+  });
+
+  it("returns price data when usdPrice is present", async () => {
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: async () => [{
+        id: "So11111111111111111111111111111111111111112",
+        organicScore: 90,
+        isVerified: true,
+        audit: { isSus: false },
+        usdPrice: 142.5,
+        stats24h: { priceChange: 2.3 },
+        symbol: "SOL",
+        name: "Wrapped SOL",
+      }],
+    });
+    const result = await fetchToken("So11111111111111111111111111111111111111112");
+    expect(result).not.toBeNull();
+    expect(result!.price).not.toBeNull();
+    expect(result!.price!.usd).toBe(142.5);
+    expect(result!.price!.change24h).toBe(2.3);
+  });
+
+  it("returns null price when usdPrice is absent", async () => {
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: async () => [{
+        id: "addr",
+        organicScore: 60,
+        isVerified: false,
+        audit: { isSus: false },
+        symbol: "UNK",
+        name: "Unknown",
+      }],
+    });
+    const result = await fetchToken("addr");
+    expect(result).not.toBeNull();
+    expect(result!.price).toBeNull();
   });
 
   it("throws on non-ok response", async () => {
     mockFetch.mockResolvedValue({ ok: false, status: 500 });
-    await expect(fetchTokenSafety("addr")).rejects.toThrow("Jupiter API error");
-  });
-});
-
-describe("fetchTokenPrice", () => {
-  it("returns price data for known token", async () => {
-    mockFetch.mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        data: {
-          So11111111111111111111111111111111111111112: {
-            price: 142.5,
-            extraInfo: { lastSwappedPrice: { lastJupiterSellAt: 142.5 } },
-          },
-        },
-      }),
-    });
-    const result = await fetchTokenPrice("So11111111111111111111111111111111111111112");
-    expect(result).not.toBeNull();
-    expect(result!.usd).toBe(142.5);
-  });
-
-  it("returns null when mint not in response", async () => {
-    mockFetch.mockResolvedValue({ ok: true, json: async () => ({ data: {} }) });
-    const result = await fetchTokenPrice("unknownMint");
-    expect(result).toBeNull();
+    await expect(fetchToken("addr")).rejects.toThrow("Jupiter API error");
   });
 });
 

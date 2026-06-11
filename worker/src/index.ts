@@ -250,6 +250,62 @@ async function handleHeliusToken(url: URL, env: Env): Promise<Response> {
   return json(data, upstream.status);
 }
 
+async function handleAiDeepExtension(req: Request, env: Env): Promise<Response> {
+  const body = await req.json<Record<string, unknown>>();
+
+  const mint = typeof body.mint === "string" ? body.mint.trim() : "";
+  const ticker = typeof body.ticker === "string" ? body.ticker.trim() : "";
+  if (!mint || !ticker) {
+    return err("Missing required fields: mint, ticker", 400);
+  }
+
+  const price = typeof body.price === "number" && isFinite(body.price) ? body.price : 0;
+  const safetyScore = typeof body.safetyScore === "number" && isFinite(body.safetyScore)
+    ? Math.max(0, Math.min(100, body.safetyScore)) : 0;
+  const volume24h = typeof body.volume24h === "number" && isFinite(body.volume24h) ? body.volume24h : 0;
+
+  const systemPrompt =
+    "You are a DeFi analyst for Solana traders. Write 3-4 sentences analyzing the token's risk, momentum, and key on-chain signals. Be direct and data-driven. No disclaimers.";
+
+  const userContent = [
+    `Token: ${ticker} (${mint})`,
+    `Safety score: ${safetyScore}/100`,
+    `Price: $${price}`,
+    `24h volume: $${volume24h.toLocaleString()}`,
+  ].join("\n");
+
+  const upstream = await fetch(`${ANTHROPIC_BASE}/messages`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-api-key": env.ANTHROPIC_API_KEY,
+      "anthropic-version": "2023-06-01",
+    },
+    body: JSON.stringify({
+      model: "claude-sonnet-4-6",
+      max_tokens: 300,
+      system: systemPrompt,
+      messages: [{ role: "user", content: userContent }],
+      stream: true,
+    }),
+  });
+
+  if (!upstream.ok) {
+    const errorText = await upstream.text();
+    return err(`Anthropic error ${upstream.status}: ${errorText}`, upstream.status);
+  }
+
+  return new Response(upstream.body, {
+    status: upstream.status,
+    headers: {
+      ...cors,
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      "X-Accel-Buffering": "no",
+    },
+  });
+}
+
 // ─────────────────────────── Reown auth page ─────────────────────────────────
 
 function authPage(callbackUrl: string, projectId: string): string {
@@ -366,7 +422,7 @@ export default {
       });
     }
 
-    // Extension bearer-token auth — covers /ai/fast only
+    // Extension bearer-token auth — covers /ai/fast and /ai/deep
     // The extension cannot sign HMAC (no shared secret in client code).
     // EXTENSION_SECRET is a separate Worker secret, not APP_SECRET.
     if (req.headers.get("X-Quickdraw-Client") === "extension") {
@@ -375,8 +431,15 @@ export default {
       if (!secret || secret !== env.EXTENSION_SECRET) {
         return err("Unauthorized", 401);
       }
+      const ip = req.headers.get("CF-Connecting-IP") ?? "unknown";
+      if (!(await checkRateLimit(ip, env.RATE_LIMIT_KV))) {
+        return err("Too many requests", 429);
+      }
       if (url.pathname === "/ai/fast" && req.method === "POST") {
         return handleAi(req, env, "claude-haiku-4-5-20251001");
+      }
+      if (url.pathname === "/ai/deep" && req.method === "POST") {
+        return handleAiDeepExtension(req, env);
       }
       return err("Not found", 404);
     }

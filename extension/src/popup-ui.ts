@@ -1,11 +1,12 @@
 import type { SafetyScore, TokenPrice, WalletState } from "./types";
+import { DS, safetyColor } from "./styles";
 
 const HOST_ID = "quickdraw-host";
 
 export interface PopupCallbacks {
   onDismiss: () => void;
-  onSwapClick: () => void;
-  onConnectWallet: () => void;
+  onGear: () => void;
+  onBuy: () => void;
 }
 
 export interface PopupOptions {
@@ -32,13 +33,24 @@ export function createPopup(opts: PopupOptions): PopupController {
   const shadow = host.attachShadow({ mode: "open" });
   shadow.innerHTML = buildShell(opts.address);
 
-  // Wire dismiss
   shadow.getElementById("qd-close")?.addEventListener("click", () => {
     removePopup();
     opts.callbacks.onDismiss();
   });
 
-  // Wire copy address
+  shadow.getElementById("qd-gear")?.addEventListener("click", () => {
+    opts.callbacks.onGear();
+  });
+
+  shadow.getElementById("qd-buy")?.addEventListener("click", () => {
+    opts.callbacks.onBuy();
+  });
+
+  shadow.getElementById("qd-cancel")?.addEventListener("click", () => {
+    removePopup();
+    opts.callbacks.onDismiss();
+  });
+
   const copyEl = shadow.getElementById("qd-copy");
   if (copyEl) {
     copyEl.addEventListener("click", () => {
@@ -47,19 +59,13 @@ export function createPopup(opts: PopupOptions): PopupController {
         if (!span) return;
         const prev = span.textContent;
         span.textContent = "COPIED!";
-        copyEl.style.color = "#8BF542";
+        copyEl.style.color = DS.safe;
         setTimeout(() => { span.textContent = prev; copyEl.style.color = ""; }, 1000);
       }).catch(() => {});
     });
   }
 
-  // Wire swap / connect button
-  shadow.getElementById("qd-swap")?.addEventListener("click", () => {
-    opts.callbacks.onSwapClick();
-  });
-
   host.style.pointerEvents = "auto";
-
   return new PopupController(shadow, host, opts);
 }
 
@@ -79,12 +85,12 @@ export class PopupController {
     this.host.style.top = `${y}px`;
   }
 
-  showToken(safety: SafetyScore, price: TokenPrice | null, wallet: WalletState): void {
+  showToken(safety: SafetyScore, price: TokenPrice | null): void {
+    const bg = safetyColor(safety.score);
+    const fg = safety.textColor;
+
     const header = this.shadow.getElementById("qd-header");
-    if (header) {
-      header.style.background = safety.color;
-      header.style.color = safety.textColor;
-    }
+    if (header) { header.style.background = bg; header.style.color = fg; }
 
     const scoreEl = this.shadow.getElementById("qd-score");
     if (scoreEl) scoreEl.textContent = String(safety.score);
@@ -95,42 +101,35 @@ export class PopupController {
     const tickerEl = this.shadow.getElementById("qd-ticker");
     if (tickerEl) tickerEl.textContent = price?.symbol ?? this.opts.address.slice(0, 6) + "…";
 
-    const priceEl = this.shadow.getElementById("qd-price");
-    if (priceEl && price) {
-      priceEl.textContent = `$${price.usd < 0.01 ? price.usd.toFixed(6) : price.usd.toFixed(4)}`;
-      priceEl.style.display = "block";
-    }
+    const buyBtn = this.shadow.getElementById("qd-buy") as HTMLButtonElement | null;
+    if (buyBtn) { buyBtn.style.background = bg; buyBtn.style.color = fg; }
 
-    const narrationEl = this.shadow.getElementById("qd-narration");
-    if (narrationEl) narrationEl.textContent = "Analyzing…";
+    if (price) {
+      const priceEl = this.shadow.getElementById("qd-price");
+      if (priceEl) priceEl.textContent = `$${price.usd < 0.01 ? price.usd.toFixed(6) : price.usd.toFixed(4)}`;
 
-    const swapBtn = this.shadow.getElementById("qd-swap") as HTMLButtonElement | null;
-    if (swapBtn) {
-      swapBtn.textContent = wallet.connected ? "SWAP" : "CONNECT WALLET";
-      swapBtn.style.background = safety.color;
-      swapBtn.style.color = safety.textColor;
+      const dir = price.change24h >= 0 ? "▲" : "▼";
+      const changeEl = this.shadow.getElementById("qd-change");
+      if (changeEl) {
+        changeEl.textContent = `${dir} ${Math.abs(price.change24h).toFixed(1)}%`;
+        changeEl.style.color = price.change24h >= 0 ? "#8BF542" : "#F54242";
+      }
     }
   }
 
   appendNarration(delta: string): void {
     const el = this.shadow.getElementById("qd-narration");
     if (!el) return;
-    if (el.textContent === "Analyzing…") el.textContent = "";
+    if (el.style.display === "none" || !el.style.display) el.style.display = "block";
     el.textContent += delta;
   }
 
   showError(msg: string): void {
-    const el = this.shadow.getElementById("qd-narration");
-    if (el) { el.textContent = msg; el.style.color = "#F54242"; }
+    const labelEl = this.shadow.getElementById("qd-score-label");
+    if (labelEl) labelEl.textContent = msg || "Not found";
   }
 
-  mountSwapPanel(panelEl: HTMLElement): void {
-    const footer = this.shadow.getElementById("qd-footer");
-    if (footer) {
-      footer.replaceWith(panelEl);
-      panelEl.id = "qd-footer";
-    }
-  }
+  updateWallet(_wallet: WalletState): void {}
 }
 
 function buildShell(address: string): string {
@@ -138,134 +137,62 @@ function buildShell(address: string): string {
   return `
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
-  :host {
-    font-family: 'Space Mono', 'Courier New', monospace;
-    font-size: 12px;
-  }
-  .popup {
-    width: 280px;
-    background: #181818;
-    border: 2px solid #000;
-    box-shadow: 4px 4px 0 #000;
-    overflow: hidden;
-  }
-  #qd-header {
-    background: #1e1e1e;
-    padding: 10px 12px;
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    color: #111;
-    transition: background 0.15s;
-  }
-  #qd-score {
-    font-size: 32px;
-    font-weight: 700;
-    line-height: 1;
-    min-width: 44px;
-  }
+  :host { font-family: ${DS.font}; font-size: 12px; }
+  .popup { width: 260px; background: ${DS.bg}; border: 2px solid #333; box-shadow: 3px 3px 0 #333; overflow: hidden; }
+  #qd-header { padding: 12px 10px; display: flex; align-items: center; gap: 10px;
+    background: #222; color: #555; transition: background 0.15s, color 0.15s; }
+  #qd-score { font-size: 34px; font-weight: 700; line-height: 1; min-width: 44px; }
   .header-meta { flex: 1; }
-  #qd-score-label {
-    font-size: 9px;
-    font-weight: 700;
-    letter-spacing: 0.08em;
-    opacity: 0.6;
-    text-transform: uppercase;
-  }
-  #qd-ticker {
-    font-size: 16px;
-    font-weight: 700;
-    line-height: 1.2;
-    margin-top: 2px;
-  }
-  #qd-close {
-    margin-left: auto;
-    background: none;
-    border: none;
-    cursor: pointer;
-    font-size: 14px;
-    opacity: 0.5;
-    color: inherit;
-    padding: 2px 4px;
-    line-height: 1;
-  }
-  #qd-close:hover { opacity: 1; }
-  .qd-addr {
-    padding: 5px 12px 0;
-    font-size: 10px;
-    color: #555;
-    letter-spacing: 0.04em;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    user-select: none;
-  }
-  .qd-addr:hover { color: #888; }
+  #qd-score-label { font-size: 9px; font-weight: 700; letter-spacing: 0.08em; }
+  #qd-ticker { font-size: 17px; font-weight: 700; line-height: 1.2; margin-top: 1px; }
+  .header-btns { display: flex; gap: 6px; }
+  .qd-hdr-btn { background: none; border: none; cursor: pointer; font-size: 13px;
+    color: inherit; padding: 2px; line-height: 1; font-family: Inter, sans-serif; opacity: 0.7; }
+  .qd-hdr-btn:hover { opacity: 1; }
+  .qd-addr { padding: 4px 12px; font-size: 10px; color: #444; letter-spacing: 0.04em;
+    cursor: pointer; display: flex; align-items: center; gap: 4px; user-select: none; }
+  .qd-addr:hover { color: #666; }
+  .qd-copy-icon { opacity: 0; font-size: 9px; }
   .qd-addr:hover .qd-copy-icon { opacity: 1; }
-  .qd-copy-icon {
-    opacity: 0;
-    font-size: 9px;
-    transition: opacity 0.1s;
-  }
-  #qd-price {
-    padding: 6px 12px 2px;
-    font-size: 13px;
-    color: #fff;
-    font-weight: 700;
-    display: none;
-  }
-  #qd-narration {
-    padding: 4px 12px 10px;
-    font-size: 11px;
-    color: #888;
-    line-height: 1.5;
-    min-height: 32px;
-  }
-  #qd-footer {
-    display: flex;
-    border-top: 1px solid #1e1e1e;
-  }
-  #qd-swap {
-    flex: 1;
-    padding: 9px 0;
-    font-size: 11px;
-    font-weight: 700;
-    letter-spacing: 0.06em;
-    cursor: pointer;
-    border: none;
-    background: #333;
-    color: #888;
-    font-family: inherit;
-    transition: background 0.15s;
-  }
-  #qd-cancel {
-    padding: 9px 12px;
-    font-size: 11px;
-    color: #555;
-    cursor: pointer;
-    border: none;
-    background: #1a1a1a;
-    border-left: 1px solid #1e1e1e;
-    font-family: inherit;
-  }
-  #qd-cancel:hover { color: #fff; }
+  .qd-price-row { padding: 8px 12px 4px; display: flex; align-items: center; gap: 10px; }
+  #qd-price { font-size: 13px; color: #fff; font-weight: 700; }
+  #qd-change { font-size: 12px; font-weight: 700; }
+  #qd-narration { display: none; padding: 6px 12px 8px; font-size: 10px; color: #666;
+    line-height: 1.5; font-style: italic; border-top: 1px solid #1e1e1e; }
+  .qd-sep { height: 1px; background: #1e1e1e; }
+  .qd-actions { display: flex; height: 34px; }
+  #qd-buy { flex: 1; background: #2a2a2a; color: #555; font-family: ${DS.font}; font-size: 11px;
+    font-weight: 700; letter-spacing: 0.06em; cursor: pointer; border: none;
+    transition: background 0.15s, color 0.15s; }
+  #qd-buy:hover { filter: brightness(1.1); }
+  .qd-act-div { width: 1px; background: #111; flex-shrink: 0; }
+  #qd-cancel { flex: 1; background: #1a1a1a; color: #fff; font-family: ${DS.font}; font-size: 11px;
+    font-weight: 700; letter-spacing: 0.06em; cursor: pointer; border: none; }
+  #qd-cancel:hover { background: #222; }
 </style>
 <div class="popup">
   <div id="qd-header">
-    <span id="qd-score">?</span>
+    <span id="qd-score">—</span>
     <div class="header-meta">
-      <div id="qd-score-label">…</div>
+      <div id="qd-score-label">FETCHING…</div>
       <div id="qd-ticker">⚡ QUICKDRAW</div>
     </div>
-    <button id="qd-close" title="Dismiss">✕</button>
+    <div class="header-btns">
+      <button id="qd-gear" class="qd-hdr-btn" title="Settings">⚙</button>
+      <button id="qd-close" class="qd-hdr-btn" title="Dismiss">✕</button>
+    </div>
   </div>
-  <div class="qd-addr" id="qd-copy"><span>${short}</span><span class="qd-copy-icon">⧉</span></div>
-  <div id="qd-price"></div>
-  <div id="qd-narration">Fetching…</div>
-  <div id="qd-footer">
-    <button id="qd-swap">SWAP</button>
-    <button id="qd-cancel">✕</button>
+  <div id="qd-copy" class="qd-addr"><span>${short}</span><span class="qd-copy-icon">⧉</span></div>
+  <div class="qd-price-row">
+    <span id="qd-price"></span>
+    <span id="qd-change"></span>
+  </div>
+  <div id="qd-narration"></div>
+  <div class="qd-sep"></div>
+  <div class="qd-actions">
+    <button id="qd-buy">BUY</button>
+    <div class="qd-act-div"></div>
+    <button id="qd-cancel">CANCEL</button>
   </div>
 </div>`;
 }
