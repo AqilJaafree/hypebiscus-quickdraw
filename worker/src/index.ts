@@ -254,6 +254,9 @@ async function handleHeliusToken(url: URL, env: Env): Promise<Response> {
 async function handleHeliusPortfolio(url: URL, env: Env): Promise<Response> {
   const wallet = url.searchParams.get("wallet");
   if (!wallet) return err("wallet param required");
+  if (!/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(wallet)) {
+    return err("valid wallet param required");
+  }
 
   const upstream = await fetch(
     `https://mainnet.helius-rpc.com/?api-key=${env.HELIUS_API_KEY}`,

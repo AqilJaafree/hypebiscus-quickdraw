@@ -498,7 +498,7 @@ async function handleMessage(msg: BgRequest, respond: (r: BgResponse) => void): 
         quotes.push({
           adapter: "jupiter",
           outAmount: jup.outAmount ?? "0",
-          priceImpactPct: jup.priceImpactPct ?? 0,
+          priceImpactPct: Number(jup.priceImpactPct ?? 0) * 100,
           routeLabel: jup.routePlan?.[0]?.swapInfo?.label ?? "Jupiter",
         });
       }

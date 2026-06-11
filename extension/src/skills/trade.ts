@@ -11,12 +11,12 @@ export function formatSolAmount(sol: number): string {
 
 export function parseOutputAmount(rawAmount: string, decimals: number): string {
   if (!rawAmount) return "—";
-  const num = BigInt(rawAmount);
-  const divisor = BigInt(Math.pow(10, decimals));
+  let num: bigint;
+  try { num = BigInt(rawAmount); } catch { return "—"; }
+  const divisor = 10n ** BigInt(decimals);
   const whole = num / divisor;
-  const frac = num % divisor;
-  const fracStr = frac.toString().padStart(decimals, "0").slice(0, decimals === 6 ? 6 : 2);
-  return `${whole}.${fracStr}`;
+  const frac = (num % divisor).toString().padStart(decimals, "0").slice(0, 4);
+  return `${whole}.${frac}`;
 }
 
 interface TradeState {

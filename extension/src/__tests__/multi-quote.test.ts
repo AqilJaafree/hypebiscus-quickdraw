@@ -38,3 +38,13 @@ describe("rankQuotes: single quote returns single-element array", () => {
     expect(ranked[0].outAmount).toBe("999");
   });
 });
+
+describe("rankQuotes: empty outAmount treated as zero (sorts last)", () => {
+  it("quote with empty outAmount sorts after a quote with a real amount", () => {
+    const bad: AdapterQuote = { adapter: "jupiter", outAmount: "", priceImpactPct: 0, routeLabel: "Jupiter" };
+    const good: AdapterQuote = { adapter: "raydium", outAmount: "1000", priceImpactPct: 0, routeLabel: "Raydium" };
+    const ranked = rankQuotes([bad, good]);
+    expect(ranked[0].adapter).toBe("raydium");
+    expect(ranked[1].adapter).toBe("jupiter");
+  });
+});
