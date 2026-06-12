@@ -1,5 +1,7 @@
 import { sendBg, esc } from "./shared";
 import type { WalletState, PortfolioItem } from "./types";
+import { defaultMode } from "./detection-rules";
+import type { SiteMode } from "./detection-rules";
 
 function formatDuration(ms: number): string {
   const s = Math.floor(ms / 1000);
@@ -103,6 +105,45 @@ function init(): void {
       btn.classList.add("active");
     });
   });
+
+  // ── Site detection rules ───────────────────────────────────────────────────
+  const hostnameEl = document.getElementById("site-hostname") as HTMLElement;
+  const siteBtns = [
+    document.getElementById("site-aggressive") as HTMLButtonElement,
+    document.getElementById("site-selection") as HTMLButtonElement,
+    document.getElementById("site-off") as HTMLButtonElement,
+  ];
+  const siteModes: SiteMode[] = ["aggressive", "selection", "off"];
+
+  function renderSiteMode(mode: SiteMode): void {
+    const idx = siteModes.indexOf(mode);
+    siteBtns.forEach((b, i) => b.classList.toggle("active", i === idx));
+  }
+
+  async function saveSiteMode(hostname: string, mode: SiteMode): Promise<void> {
+    const result = await chrome.storage.sync.get("siteRules");
+    const rules = (result.siteRules ?? {}) as Record<string, SiteMode>;
+    rules[hostname] = mode;
+    await chrome.storage.sync.set({ siteRules: rules });
+    renderSiteMode(mode);
+  }
+
+  async function loadSiteRule(): Promise<void> {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!tab?.url) return;
+    let hostname: string;
+    try { hostname = new URL(tab.url).hostname; } catch { return; }
+    hostnameEl.textContent = hostname;
+    const result = await chrome.storage.sync.get("siteRules");
+    const rules = (result.siteRules ?? {}) as Record<string, SiteMode>;
+    const mode = rules[hostname] ?? defaultMode(hostname);
+    renderSiteMode(mode);
+    siteBtns.forEach((btn, i) => {
+      btn.addEventListener("click", () => saveSiteMode(hostname, siteModes[i]));
+    });
+  }
+
+  loadSiteRule();
 
   // ── Wallet connect (storage-based) ─────────────────────────────────────────
   // The popup fires the connect request and then watches chrome.storage.local

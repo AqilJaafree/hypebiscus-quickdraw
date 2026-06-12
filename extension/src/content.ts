@@ -4,6 +4,8 @@ import { sendBg } from "./shared";
 import type { TokenData } from "./types";
 import { extractTweetContext } from "./tweet-context";
 import type { TweetContext } from "./tweet-context";
+import { getSiteMode, defaultMode } from "./detection-rules";
+import type { SiteMode } from "./detection-rules";
 
 function clampPosition(x: number, y: number): { x: number; y: number } {
   const POP_W = 264, POP_H = 160;
@@ -15,12 +17,23 @@ function clampPosition(x: number, y: number): { x: number; y: number } {
 // ── Detection lifecycle ────────────────────────────────────────────────────────
 let activeController: PopupController | null = null;
 let detectionEnabled = true;
+let currentSiteMode: SiteMode = defaultMode(window.location.hostname);
+
+getSiteMode(window.location.hostname).then(m => { currentSiteMode = m; }).catch(() => {});
+
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area !== "sync" || !changes.siteRules) return;
+  const rules = (changes.siteRules.newValue ?? {}) as Record<string, SiteMode>;
+  currentSiteMode = rules[window.location.hostname] ?? defaultMode(window.location.hostname);
+});
 
 const lastTriggerMap = new Map<string, number>();
 const CONTENT_DEDUP_MS = 30_000;
 
-async function triggerAddress(address: string, rawX: number, rawY: number, sourceEl?: Element): Promise<void> {
+async function triggerAddress(address: string, rawX: number, rawY: number, sourceEl?: Element, source: "selection" | "mutation" = "mutation"): Promise<void> {
   if (!detectionEnabled) return;
+  if (currentSiteMode === "off") return;
+  if (currentSiteMode === "selection" && source !== "selection") return;
 
   const now = Date.now();
   const last = lastTriggerMap.get(address);
@@ -99,7 +112,7 @@ function onSelectionChange(): void {
     if (!detection || detection.type !== "address") return;
     const rect = detection.rect;
     const anchorEl = window.getSelection()?.anchorNode?.parentElement ?? undefined;
-    triggerAddress(detection.value, rect.left, rect.bottom, anchorEl);
+    triggerAddress(detection.value, rect.left, rect.bottom, anchorEl, "selection");
   }, DEBOUNCE_MS);
 }
 

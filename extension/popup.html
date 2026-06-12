@@ -147,6 +147,7 @@
   <!-- SKILLS pane -->
   <div class="qd-pane" id="pane-skills">
     <div class="content">
+
       <div class="section">
         <div class="section-label">AI NARRATION</div>
         <div class="stat-row">
@@ -154,10 +155,22 @@
           <span class="stat-val" id="ai-narration-status">ON</span>
         </div>
       </div>
-      <div style="font-size:9px;color:#333;line-height:1.6;">
-        Quickdraw streams a 1–2 sentence Haiku analysis for each detected token.
-        Requires the worker to be running.
+
+      <div class="sep"></div>
+
+      <div class="section">
+        <div class="section-label">SITE DETECTION</div>
+        <div style="font-size:9px;color:#555;margin-bottom:6px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" id="site-hostname">—</div>
+        <div class="ai-toggle" id="site-mode-toggle">
+          <button class="ai-btn" id="site-aggressive">All</button>
+          <button class="ai-btn" id="site-selection">Select</button>
+          <button class="ai-btn" id="site-off">Off</button>
+        </div>
+        <div style="font-size:9px;color:#333;margin-top:4px;line-height:1.5;">
+          All: every address · Select: highlight only · Off: disabled
+        </div>
       </div>
+
     </div>
   </div>
 
