@@ -363,8 +363,17 @@ async function handleMessage(msg: BgRequest, respond: (r: BgResponse) => void): 
     }
 
     if (msg.type === "set_wallet") {
+      const prevAddress = walletState.address;
       walletState = msg.wallet;
       await chrome.storage.local.set({ wallet: walletState });
+
+      // Clear portfolio cache on disconnect or address change
+      if (!walletState.connected || walletState.address !== prevAddress) {
+        if (prevAddress) {
+          chrome.storage.session.remove(`portfolio_${prevAddress}`).catch(() => {});
+        }
+      }
+
       respond({ ok: true, data: null });
       return;
     }
@@ -551,16 +560,19 @@ async function handleMessage(msg: BgRequest, respond: (r: BgResponse) => void): 
         return;
       }
 
-      // Check 30s session cache keyed by wallet address
       const cacheKey = `portfolio_${walletState.address}`;
-      const cached = await chrome.storage.session.get(cacheKey);
-      if (cached[cacheKey]) {
-        const entry = cached[cacheKey] as { data: PortfolioItem[]; expiresAt: number };
-        if (Date.now() < entry.expiresAt) {
-          respond({ ok: true, data: entry.data });
-          return;
+
+      // Try cache first — any storage error falls through to live fetch
+      try {
+        const cached = await chrome.storage.session.get(cacheKey);
+        if (cached[cacheKey]) {
+          const entry = cached[cacheKey] as { data: PortfolioItem[]; expiresAt: number };
+          if (Date.now() < entry.expiresAt) {
+            respond({ ok: true, data: entry.data });
+            return;
+          }
         }
-      }
+      } catch { /* storage unavailable — fall through to live fetch */ }
 
       const resp = await fetch(
         `${WORKER_URL}/defi/helius/portfolio?wallet=${encodeURIComponent(walletState.address)}`,
@@ -572,11 +584,16 @@ async function handleMessage(msg: BgRequest, respond: (r: BgResponse) => void): 
         },
       );
       if (!resp.ok) throw new Error("Portfolio fetch failed");
-      const data = await resp.json() as PortfolioItem[];
+      const rawData = await resp.json();
+      if (!Array.isArray(rawData)) throw new Error("Unexpected portfolio response");
+      const data = rawData as PortfolioItem[];
 
-      await chrome.storage.session.set({
-        [cacheKey]: { data, expiresAt: Date.now() + 30_000 },
-      });
+      // Write to cache — failure here is non-fatal
+      try {
+        await chrome.storage.session.set({
+          [cacheKey]: { data, expiresAt: Date.now() + 30_000 },
+        });
+      } catch { /* storage write failed — data still returned */ }
 
       respond({ ok: true, data });
       return;
