@@ -43,7 +43,8 @@ async function loadWalletFromStorage(): Promise<void> {
   const { wallet } = await chrome.storage.local.get("wallet");
   if (wallet) walletState = wallet as WalletState;
 }
-loadWalletFromStorage();
+// Capture the promise so message handlers can await it after SW restart.
+const walletReady = loadWalletFromStorage();
 
 // ── Token fetch ────────────────────────────────────────────────────────────────
 async function getTokenData(address: string): Promise<TokenData> {
@@ -84,27 +85,6 @@ async function fetchQuoteFromWorker(
   });
   if (!resp.ok) throw new Error("Quote failed");
   return resp.json();
-}
-
-async function buildSwapTxFromWorker(
-  inputMint: string,
-  outputMint: string,
-  amountLamports: number,
-  walletAddress: string,
-): Promise<string> {
-  const quote = await fetchQuoteFromWorker(inputMint, outputMint, amountLamports);
-  const resp = await fetch(`${WORKER_URL}/defi/jupiter/swap`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "X-Quickdraw-Client": "extension",
-      "Authorization": `Bearer ${EXTENSION_SECRET}`,
-    },
-    body: JSON.stringify({ quoteResponse: quote, userPublicKey: walletAddress }),
-  });
-  if (!resp.ok) throw new Error("Swap build failed");
-  const data = await resp.json() as { swapTransaction: string };
-  return data.swapTransaction;
 }
 
 async function fetchRaydiumQuote(
@@ -166,7 +146,12 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
   for (const mint of mints) {
     try {
       const params = new URLSearchParams({ ids: mint });
-      const resp = await fetch(`${WORKER_URL}/defi/jupiter/price?${params}`);
+      const resp = await fetch(`${WORKER_URL}/defi/jupiter/price?${params}`, {
+        headers: {
+          "X-Quickdraw-Client": "extension",
+          "Authorization": `Bearer ${EXTENSION_SECRET}`,
+        },
+      });
       if (!resp.ok) continue;
       const data = await resp.json() as { data: Record<string, { price: number }> };
       const currentPrice = data.data[mint]?.price;
@@ -416,7 +401,12 @@ async function handleMessage(msg: BgRequest, respond: (r: BgResponse) => void): 
 
     if (msg.type === "get_watchlist_prices") {
       const ids = msg.mints.join(",");
-      const resp = await fetch(`${WORKER_URL}/defi/jupiter/price?ids=${ids}`);
+      const resp = await fetch(`${WORKER_URL}/defi/jupiter/price?ids=${ids}`, {
+        headers: {
+          "X-Quickdraw-Client": "extension",
+          "Authorization": `Bearer ${EXTENSION_SECRET}`,
+        },
+      });
       if (!resp.ok) {
         respond({ ok: false, error: "Price fetch failed" });
         return;
@@ -498,7 +488,11 @@ async function handleMessage(msg: BgRequest, respond: (r: BgResponse) => void): 
         respond({ ok: false, error: result?.error ?? "Wallet connect returned no result" });
         return;
       }
-      const w: WalletState = { address: result.address!, adapter: "injected", connected: true };
+      if (!result.address) {
+        respond({ ok: false, error: "Wallet returned no address" });
+        return;
+      }
+      const w: WalletState = { address: result.address, adapter: "injected", connected: true };
       walletState = w;
       await chrome.storage.local.set({ wallet: w });
       respond({ ok: true, data: w });
@@ -522,7 +516,7 @@ async function handleMessage(msg: BgRequest, respond: (r: BgResponse) => void): 
         quotes.push({
           adapter: "jupiter",
           outAmount: jup.outAmount ?? "0",
-          priceImpactPct: Number(jup.priceImpactPct ?? 0) * 100,
+          priceImpactPct: Number(jup.priceImpactPct ?? 0),
           routeLabel: jup.routePlan?.[0]?.swapInfo?.label ?? "Jupiter",
         });
       }
@@ -542,19 +536,8 @@ async function handleMessage(msg: BgRequest, respond: (r: BgResponse) => void): 
       return;
     }
 
-    if (msg.type === "quote") {
-      const quote = await fetchQuoteFromWorker(msg.inputMint, msg.outputMint, msg.amountLamports);
-      respond({ ok: true, data: quote });
-      return;
-    }
-
-    if (msg.type === "swap_tx") {
-      const txBase64 = await buildSwapTxFromWorker(msg.inputMint, msg.outputMint, msg.amountLamports, msg.walletAddress);
-      respond({ ok: true, data: txBase64 });
-      return;
-    }
-
     if (msg.type === "get_portfolio") {
+      await walletReady;
       if (!walletState.connected || !walletState.address) {
         respond({ ok: false, error: "No wallet connected" });
         return;

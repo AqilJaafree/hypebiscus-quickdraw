@@ -17,7 +17,7 @@ export function parseEngagement(text: string): number | null {
     const n = parseFloat(t.slice(0, -1));
     return isNaN(n) ? null : Math.round(n * 1_000_000);
   }
-  const n = parseFloat(t);
+  const n = parseFloat(t.replace(/,/g, ""));
   return isNaN(n) ? null : n;
 }
 

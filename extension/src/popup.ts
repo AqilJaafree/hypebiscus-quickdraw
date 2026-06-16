@@ -1,5 +1,5 @@
 import { sendBg, esc } from "./shared";
-import type { WalletState, PortfolioItem } from "./types";
+import type { WalletState, PortfolioItem, SkillSettings } from "./types";
 import { getSiteMode, setSiteMode } from "./detection-rules";
 import type { SiteMode } from "./detection-rules";
 
@@ -98,15 +98,27 @@ function init(): void {
   const sessionTimeEl = document.getElementById("session-time") as HTMLElement;
 
   // ── AI mode toggle ─────────────────────────────────────────────────────────
+  const aiModes = ["auto", "cloud", "local"] as const;
+  type AiMode = typeof aiModes[number];
   const aiButtons = ["ai-auto", "ai-cloud", "ai-local"].map(
     id => document.getElementById(id) as HTMLButtonElement,
   );
-  aiButtons.forEach(btn => {
-    btn.addEventListener("click", () => {
-      aiButtons.forEach(b => b.classList.remove("active"));
-      btn.classList.add("active");
+  function renderAiMode(mode: AiMode): void {
+    const idx = aiModes.indexOf(mode);
+    aiButtons.forEach((b, i) => b.classList.toggle("active", i === idx));
+  }
+  aiButtons.forEach((btn, i) => {
+    btn.addEventListener("click", async () => {
+      renderAiMode(aiModes[i]);
+      try {
+        const settings = await sendBg<SkillSettings>({ type: "get_skill_settings" });
+        await sendBg({ type: "set_skill_settings", settings: { ...settings, aiMode: aiModes[i] } });
+      } catch { /* non-fatal */ }
     });
   });
+  sendBg<SkillSettings>({ type: "get_skill_settings" })
+    .then(s => renderAiMode((s.aiMode ?? "auto") as AiMode))
+    .catch(() => {});
 
   // ── Site detection rules ───────────────────────────────────────────────────
   const hostnameEl = document.getElementById("site-hostname") as HTMLElement;

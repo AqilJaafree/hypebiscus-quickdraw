@@ -69,6 +69,7 @@ async function verifyHmac(req: Request, secret: string): Promise<boolean> {
   );
 
   // Decode hex sig header back to raw bytes
+  if (sig.length !== 64) return false; // SHA-256 hex is exactly 64 chars
   const hexPairs = sig.match(/.{2}/g) ?? [];
   if (hexPairs.length !== 32) return false; // SHA-256 = 32 bytes
   const sigBytes = new Uint8Array(hexPairs.map(b => parseInt(b, 16)));

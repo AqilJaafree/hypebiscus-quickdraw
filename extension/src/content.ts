@@ -133,6 +133,7 @@ let mutationTimer: ReturnType<typeof setTimeout> | null = null;
 
 function processMutations(): void {
   if (!detectionEnabled) { mutationQueue = []; return; }
+  if (currentSiteMode === "off") { mutationQueue = []; return; }
   const batch = mutationQueue;
   mutationQueue = [];
   for (const mutation of batch) {
