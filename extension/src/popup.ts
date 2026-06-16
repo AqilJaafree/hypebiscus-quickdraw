@@ -1,6 +1,6 @@
 import { sendBg, esc } from "./shared";
 import type { WalletState, PortfolioItem } from "./types";
-import { defaultMode } from "./detection-rules";
+import { getSiteMode, setSiteMode } from "./detection-rules";
 import type { SiteMode } from "./detection-rules";
 
 function formatDuration(ms: number): string {
@@ -53,6 +53,8 @@ async function loadPortfolio(wallet: WalletState): Promise<void> {
     section.style.display = "none";
   }
 }
+
+let currentHostname = "";
 
 function init(): void {
   // ── Close ──────────────────────────────────────────────────────────────────
@@ -120,27 +122,26 @@ function init(): void {
     siteBtns.forEach((b, i) => b.classList.toggle("active", i === idx));
   }
 
-  async function saveSiteMode(hostname: string, mode: SiteMode): Promise<void> {
-    const result = await chrome.storage.sync.get("siteRules");
-    const rules = (result.siteRules ?? {}) as Record<string, SiteMode>;
-    rules[hostname] = mode;
-    await chrome.storage.sync.set({ siteRules: rules });
+  async function saveSiteMode(mode: SiteMode): Promise<void> {
+    if (!currentHostname) return;
+    await setSiteMode(currentHostname, mode);
     renderSiteMode(mode);
   }
+
+  // Bind once — handlers read currentHostname at click time
+  siteBtns.forEach((btn, i) => {
+    btn.addEventListener("click", () => {
+      if (currentHostname) saveSiteMode(siteModes[i]);
+    });
+  });
 
   async function loadSiteRule(): Promise<void> {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     if (!tab?.url) return;
-    let hostname: string;
-    try { hostname = new URL(tab.url).hostname; } catch { return; }
-    hostnameEl.textContent = hostname;
-    const result = await chrome.storage.sync.get("siteRules");
-    const rules = (result.siteRules ?? {}) as Record<string, SiteMode>;
-    const mode = rules[hostname] ?? defaultMode(hostname);
+    try { currentHostname = new URL(tab.url).hostname; } catch { return; }
+    hostnameEl.textContent = currentHostname;
+    const mode = await getSiteMode(currentHostname);
     renderSiteMode(mode);
-    siteBtns.forEach((btn, i) => {
-      btn.addEventListener("click", () => saveSiteMode(hostname, siteModes[i]));
-    });
   }
 
   loadSiteRule();
