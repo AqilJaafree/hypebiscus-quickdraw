@@ -70,6 +70,10 @@
     #connect-btn.connected { background: #1a1a1a; color: #8bf542;
       border-color: #333; box-shadow: none; }
 
+    .portfolio-row { display:flex; justify-content:space-between; align-items:center; padding:1px 4px; }
+    .portfolio-sym { font-size:10px; color:#888; }
+    .portfolio-val { font-size:10px; font-weight:700; color:#fff; }
+
     /* ── Footer ─────────────────────────────────────────────────────────────── */
     .footer-sep { height: 1px; background: #2e2e2e; }
     .footer { padding: 6px 9px; }
@@ -129,12 +133,21 @@
         <button id="connect-btn">Connect Wallet</button>
       </div>
 
+      <div class="sep" id="portfolio-sep" style="display:none;"></div>
+
+      <div class="section" id="portfolio-section" style="display:none;">
+        <div class="section-label">PORTFOLIO</div>
+        <div id="portfolio-list" style="display:flex;flex-direction:column;gap:2px;"></div>
+        <div id="portfolio-total" class="stat-row" style="border-top:1px solid #2a2a2a;margin-top:4px;padding-top:4px;"></div>
+      </div>
+
     </div>
   </div>
 
   <!-- SKILLS pane -->
   <div class="qd-pane" id="pane-skills">
     <div class="content">
+
       <div class="section">
         <div class="section-label">AI NARRATION</div>
         <div class="stat-row">
@@ -142,10 +155,22 @@
           <span class="stat-val" id="ai-narration-status">ON</span>
         </div>
       </div>
-      <div style="font-size:9px;color:#333;line-height:1.6;">
-        Quickdraw streams a 1–2 sentence Haiku analysis for each detected token.
-        Requires the worker to be running.
+
+      <div class="sep"></div>
+
+      <div class="section">
+        <div class="section-label">SITE DETECTION</div>
+        <div style="font-size:9px;color:#555;margin-bottom:6px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" id="site-hostname">—</div>
+        <div class="ai-toggle" id="site-mode-toggle">
+          <button class="ai-btn" id="site-aggressive">All</button>
+          <button class="ai-btn" id="site-selection">Select</button>
+          <button class="ai-btn" id="site-off">Off</button>
+        </div>
+        <div style="font-size:9px;color:#333;margin-top:4px;line-height:1.5;">
+          All: every address · Select: highlight only · Off: disabled
+        </div>
       </div>
+
     </div>
   </div>
 

@@ -2,6 +2,10 @@ import { detectInSelection, detectInText } from "./detector";
 import { createPopup, removePopup, PopupController } from "./popup-ui";
 import { sendBg } from "./shared";
 import type { TokenData } from "./types";
+import { extractTweetContext } from "./tweet-context";
+import type { TweetContext } from "./tweet-context";
+import { getSiteMode, defaultMode } from "./detection-rules";
+import type { SiteMode } from "./detection-rules";
 
 function clampPosition(x: number, y: number): { x: number; y: number } {
   const POP_W = 264, POP_H = 160;
@@ -13,12 +17,23 @@ function clampPosition(x: number, y: number): { x: number; y: number } {
 // ── Detection lifecycle ────────────────────────────────────────────────────────
 let activeController: PopupController | null = null;
 let detectionEnabled = true;
+let currentSiteMode: SiteMode = defaultMode(window.location.hostname);
+
+getSiteMode(window.location.hostname).then(m => { currentSiteMode = m; }).catch(() => {});
+
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area !== "sync" || !changes.siteRules) return;
+  const rules = (changes.siteRules.newValue ?? {}) as Record<string, SiteMode>;
+  currentSiteMode = rules[window.location.hostname] ?? defaultMode(window.location.hostname);
+});
 
 const lastTriggerMap = new Map<string, number>();
 const CONTENT_DEDUP_MS = 30_000;
 
-async function triggerAddress(address: string, rawX: number, rawY: number): Promise<void> {
+async function triggerAddress(address: string, rawX: number, rawY: number, sourceEl?: Element, source: "selection" | "mutation" = "mutation"): Promise<void> {
   if (!detectionEnabled) return;
+  if (currentSiteMode === "off") return;
+  if (currentSiteMode === "selection" && source !== "selection") return;
 
   const now = Date.now();
   const last = lastTriggerMap.get(address);
@@ -29,6 +44,8 @@ async function triggerAddress(address: string, rawX: number, rawY: number): Prom
     if (now - ts >= CONTENT_DEDUP_MS) lastTriggerMap.delete(key);
   }
   lastTriggerMap.set(address, now);
+
+  const tweetContext = extractTweetContext(sourceEl);
 
   const { x, y } = clampPosition(rawX, rawY);
 
@@ -79,6 +96,7 @@ async function triggerAddress(address: string, rawX: number, rawY: number): Prom
       address,
       safety: { score: tokenData.safety.score, label: tokenData.safety.label, summary: tokenData.safety.summary },
       price: tokenData.price ? { usd: tokenData.price.usd, symbol: tokenData.price.symbol } : null,
+      tweetContext: tweetContext ?? null,
     });
   } catch { /* worker not running — no narration */ }
 }
@@ -93,7 +111,8 @@ function onSelectionChange(): void {
     const detection = detectInSelection();
     if (!detection || detection.type !== "address") return;
     const rect = detection.rect;
-    triggerAddress(detection.value, rect.left, rect.bottom);
+    const anchorEl = window.getSelection()?.anchorNode?.parentElement ?? undefined;
+    triggerAddress(detection.value, rect.left, rect.bottom, anchorEl, "selection");
   }, DEBOUNCE_MS);
 }
 
@@ -114,6 +133,7 @@ let mutationTimer: ReturnType<typeof setTimeout> | null = null;
 
 function processMutations(): void {
   if (!detectionEnabled) { mutationQueue = []; return; }
+  if (currentSiteMode === "off") { mutationQueue = []; return; }
   const batch = mutationQueue;
   mutationQueue = [];
   for (const mutation of batch) {
@@ -128,7 +148,7 @@ function processMutations(): void {
       if (!rect) continue;
       const first = detections[0];
       if (first.type === "address") {
-        triggerAddress(first.value, rect.left, rect.bottom);
+        triggerAddress(first.value, rect.left, rect.bottom, parent ?? undefined);
         return;
       }
     }

@@ -11,11 +11,11 @@ describe("formatSolAmount()", () => {
 });
 
 describe("parseOutputAmount()", () => {
-  it("converts lamports string to human-readable with 2 decimals for large amounts", () => {
-    expect(parseOutputAmount("1000000000", 9)).toBe("1.00");
+  it("converts lamports string to human-readable with 4 fractional digits", () => {
+    expect(parseOutputAmount("1000000000", 9)).toBe("1.0000");
   });
-  it("converts with 6 decimals for USDC-style tokens (6 decimals)", () => {
-    expect(parseOutputAmount("1000000", 6)).toBe("1.000000");
+  it("converts with 4 fractional digits for USDC-style tokens (6 decimals)", () => {
+    expect(parseOutputAmount("1000000", 6)).toBe("1.0000");
   });
   it("returns — for empty string", () => {
     expect(parseOutputAmount("", 9)).toBe("—");

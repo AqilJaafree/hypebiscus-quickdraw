@@ -1,5 +1,7 @@
-import { sendBg } from "./shared";
-import type { WalletState } from "./types";
+import { sendBg, esc } from "./shared";
+import type { WalletState, PortfolioItem, SkillSettings } from "./types";
+import { getSiteMode, setSiteMode } from "./detection-rules";
+import type { SiteMode } from "./detection-rules";
 
 function formatDuration(ms: number): string {
   const s = Math.floor(ms / 1000);
@@ -8,6 +10,51 @@ function formatDuration(ms: number): string {
   if (m < 60) return `${m}m`;
   return `${Math.floor(m / 60)}h ${m % 60}m`;
 }
+
+async function loadPortfolio(wallet: WalletState): Promise<void> {
+  const section = document.getElementById("portfolio-section") as HTMLElement;
+  const sep = document.getElementById("portfolio-sep") as HTMLElement;
+  const list = document.getElementById("portfolio-list") as HTMLElement;
+  const total = document.getElementById("portfolio-total") as HTMLElement;
+
+  if (!wallet.connected) {
+    section.style.display = "none";
+    sep.style.display = "none";
+    return;
+  }
+
+  section.style.display = "";
+  sep.style.display = "";
+  list.innerHTML = `<div class="portfolio-row"><span class="portfolio-sym">Loading…</span></div>`;
+
+  try {
+    const items = await sendBg<PortfolioItem[]>({ type: "get_portfolio" });
+
+    const sorted = items
+      .filter(i => (i.valueUsd ?? 0) > 0.01)
+      .sort((a, b) => (b.valueUsd ?? 0) - (a.valueUsd ?? 0))
+      .slice(0, 8);
+
+    const totalUsd = items.reduce((s, i) => s + (i.valueUsd ?? 0), 0);
+
+    list.innerHTML = sorted.map(i =>
+      `<div class="portfolio-row">
+        <span class="portfolio-sym">${esc(i.symbol)}</span>
+        <span class="portfolio-val">$${(i.valueUsd ?? 0).toFixed(2)}</span>
+      </div>`,
+    ).join("") || `<div class="portfolio-row"><span class="portfolio-sym">No tokens found</span></div>`;
+
+    total.innerHTML = `
+      <span class="stat-key">Total</span>
+      <span class="stat-val">$${totalUsd.toFixed(2)}</span>`;
+  } catch {
+    list.innerHTML = `<div class="portfolio-row"><span class="portfolio-sym">—</span></div>`;
+    sep.style.display = "none";
+    section.style.display = "none";
+  }
+}
+
+let currentHostname = "";
 
 function init(): void {
   // ── Close ──────────────────────────────────────────────────────────────────
@@ -51,15 +98,65 @@ function init(): void {
   const sessionTimeEl = document.getElementById("session-time") as HTMLElement;
 
   // ── AI mode toggle ─────────────────────────────────────────────────────────
+  const aiModes = ["auto", "cloud", "local"] as const;
+  type AiMode = typeof aiModes[number];
   const aiButtons = ["ai-auto", "ai-cloud", "ai-local"].map(
     id => document.getElementById(id) as HTMLButtonElement,
   );
-  aiButtons.forEach(btn => {
-    btn.addEventListener("click", () => {
-      aiButtons.forEach(b => b.classList.remove("active"));
-      btn.classList.add("active");
+  function renderAiMode(mode: AiMode): void {
+    const idx = aiModes.indexOf(mode);
+    aiButtons.forEach((b, i) => b.classList.toggle("active", i === idx));
+  }
+  aiButtons.forEach((btn, i) => {
+    btn.addEventListener("click", async () => {
+      renderAiMode(aiModes[i]);
+      try {
+        const settings = await sendBg<SkillSettings>({ type: "get_skill_settings" });
+        await sendBg({ type: "set_skill_settings", settings: { ...settings, aiMode: aiModes[i] } });
+      } catch { /* non-fatal */ }
     });
   });
+  sendBg<SkillSettings>({ type: "get_skill_settings" })
+    .then(s => renderAiMode((s.aiMode ?? "auto") as AiMode))
+    .catch(() => {});
+
+  // ── Site detection rules ───────────────────────────────────────────────────
+  const hostnameEl = document.getElementById("site-hostname") as HTMLElement;
+  const siteBtns = [
+    document.getElementById("site-aggressive") as HTMLButtonElement,
+    document.getElementById("site-selection") as HTMLButtonElement,
+    document.getElementById("site-off") as HTMLButtonElement,
+  ];
+  const siteModes: SiteMode[] = ["aggressive", "selection", "off"];
+
+  function renderSiteMode(mode: SiteMode): void {
+    const idx = siteModes.indexOf(mode);
+    siteBtns.forEach((b, i) => b.classList.toggle("active", i === idx));
+  }
+
+  async function saveSiteMode(mode: SiteMode): Promise<void> {
+    if (!currentHostname) return;
+    await setSiteMode(currentHostname, mode);
+    renderSiteMode(mode);
+  }
+
+  // Bind once — handlers read currentHostname at click time
+  siteBtns.forEach((btn, i) => {
+    btn.addEventListener("click", () => {
+      if (currentHostname) saveSiteMode(siteModes[i]);
+    });
+  });
+
+  async function loadSiteRule(): Promise<void> {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!tab?.url) return;
+    try { currentHostname = new URL(tab.url).hostname; } catch { return; }
+    hostnameEl.textContent = currentHostname;
+    const mode = await getSiteMode(currentHostname);
+    renderSiteMode(mode);
+  }
+
+  loadSiteRule();
 
   // ── Wallet connect (storage-based) ─────────────────────────────────────────
   // The popup fires the connect request and then watches chrome.storage.local
@@ -87,6 +184,7 @@ function init(): void {
     if (area !== "local" || !changes.wallet) return;
     const w = (changes.wallet.newValue ?? { address: null, adapter: null, connected: false }) as WalletState;
     renderConnectBtn(w);
+    loadPortfolio(w);
   });
 
   connectBtn.addEventListener("click", () => {
@@ -145,7 +243,10 @@ function init(): void {
     const storage = storageResult.status === "fulfilled"
       ? storageResult.value as { wallet?: WalletState; lastToken?: string }
       : {};
-    if (storage.wallet) renderConnectBtn(storage.wallet);
+    if (storage.wallet) {
+      renderConnectBtn(storage.wallet);
+      loadPortfolio(storage.wallet);
+    }
 
     const lastToken = storage.lastToken ?? null;
     lastSeenEl.textContent = lastToken

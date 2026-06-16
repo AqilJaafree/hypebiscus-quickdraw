@@ -35,6 +35,27 @@ export interface SwapQuote {
   raw: unknown;
 }
 
+export interface AdapterQuote {
+  adapter: "jupiter" | "raydium";
+  outAmount: string;
+  priceImpactPct: number;
+  routeLabel: string;
+}
+
+export interface MultiAdapterQuote {
+  best: AdapterQuote;
+  all: AdapterQuote[];
+}
+
+export interface PortfolioItem {
+  mint: string;
+  symbol: string;
+  balance: number;
+  decimals: number;
+  priceUsd: number | null;
+  valueUsd: number | null;
+}
+
 export interface WalletState {
   address: string | null;
   adapter: "phantom" | "backpack" | "solflare" | "reown" | "injected" | null;
@@ -64,6 +85,7 @@ export interface SkillSettings {
   alert: boolean;
   watch: boolean;
   deep: boolean;
+  aiMode?: "auto" | "cloud" | "local";
 }
 
 export const DEFAULT_SKILL_SETTINGS: SkillSettings = {
@@ -71,6 +93,7 @@ export const DEFAULT_SKILL_SETTINGS: SkillSettings = {
   alert: true,
   watch: true,
   deep: true,
+  aiMode: "auto",
 };
 
 export interface DeepPortRequest {
@@ -110,8 +133,8 @@ export type BgRequest =
   | { type: "get_watchlist_prices"; mints: string[] }
   | { type: "get_skill_settings" }
   | { type: "set_skill_settings"; settings: SkillSettings }
-  | { type: "quote"; inputMint: string; outputMint: string; amountLamports: number }
-  | { type: "swap_tx"; inputMint: string; outputMint: string; amountLamports: number; walletAddress: string }
+  | { type: "quote_multi"; inputMint: string; outputMint: string; amountLamports: number }
+  | { type: "get_portfolio" }
   | { type: "connect_wallet_injected" };
 
 export type BgResponse<T = unknown> =

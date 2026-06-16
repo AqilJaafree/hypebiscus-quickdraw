@@ -1,11 +1,14 @@
 import { fetchToken } from "./jupiter-client";
 import { alertShouldFire, alertShouldRearm } from "./skills/alert";
+import { rankQuotes } from "./multi-quote-utils";
 import type {
   BgRequest, BgResponse, SafetyScore, TokenData, TokenPrice,
   WalletState, PriceAlert, WatchItem, WatchItemWithPrice, SkillSettings,
-  DeepPortRequest, DeepPortMessage,
+  DeepPortRequest, DeepPortMessage, AdapterQuote, MultiAdapterQuote,
+  PortfolioItem,
 } from "./types";
 import { DEFAULT_SKILL_SETTINGS } from "./types";
+import type { TweetContext } from "./tweet-context";
 
 declare const __WORKER_URL__: string;
 declare const __EXTENSION_SECRET__: string;
@@ -40,7 +43,8 @@ async function loadWalletFromStorage(): Promise<void> {
   const { wallet } = await chrome.storage.local.get("wallet");
   if (wallet) walletState = wallet as WalletState;
 }
-loadWalletFromStorage();
+// Capture the promise so message handlers can await it after SW restart.
+const walletReady = loadWalletFromStorage();
 
 // ── Token fetch ────────────────────────────────────────────────────────────────
 async function getTokenData(address: string): Promise<TokenData> {
@@ -83,25 +87,37 @@ async function fetchQuoteFromWorker(
   return resp.json();
 }
 
-async function buildSwapTxFromWorker(
+async function fetchRaydiumQuote(
   inputMint: string,
   outputMint: string,
   amountLamports: number,
-  walletAddress: string,
-): Promise<string> {
-  const quote = await fetchQuoteFromWorker(inputMint, outputMint, amountLamports);
-  const resp = await fetch(`${WORKER_URL}/defi/jupiter/swap`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "X-Quickdraw-Client": "extension",
-      "Authorization": `Bearer ${EXTENSION_SECRET}`,
-    },
-    body: JSON.stringify({ quoteResponse: quote, userPublicKey: walletAddress }),
-  });
-  if (!resp.ok) throw new Error("Swap build failed");
-  const data = await resp.json() as { swapTransaction: string };
-  return data.swapTransaction;
+): Promise<AdapterQuote | null> {
+  try {
+    const params = new URLSearchParams({
+      inputMint,
+      outputMint,
+      amount: String(amountLamports),
+      slippageBps: "50",
+      txVersion: "V0",
+    });
+    const resp = await fetch(
+      `https://transaction-v1.raydium.io/compute/swap-base-in?${params}`,
+    );
+    if (!resp.ok) return null;
+    const data = await resp.json() as {
+      success: boolean;
+      data?: { outputAmount: string; priceImpactPct: number };
+    };
+    if (!data.success || !data.data) return null;
+    return {
+      adapter: "raydium",
+      outAmount: data.data.outputAmount,
+      priceImpactPct: data.data.priceImpactPct,
+      routeLabel: "Raydium",
+    };
+  } catch {
+    return null;
+  }
 }
 
 // ── Price alert polling ────────────────────────────────────────────────────────
@@ -130,7 +146,12 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
   for (const mint of mints) {
     try {
       const params = new URLSearchParams({ ids: mint });
-      const resp = await fetch(`${WORKER_URL}/defi/jupiter/price?${params}`);
+      const resp = await fetch(`${WORKER_URL}/defi/jupiter/price?${params}`, {
+        headers: {
+          "X-Quickdraw-Client": "extension",
+          "Authorization": `Bearer ${EXTENSION_SECRET}`,
+        },
+      });
       if (!resp.ok) continue;
       const data = await resp.json() as { data: Record<string, { price: number }> };
       const currentPrice = data.data[mint]?.price;
@@ -166,19 +187,32 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
 chrome.runtime.onConnect.addListener((port) => {
   if (port.name !== "narration") return;
 
-  port.onMessage.addListener(async (req: {
-    address: string;
-    safety: { score: number; label: string; summary: string };
-    price: { usd: number; symbol: string } | null;
-  }) => {
+  port.onMessage.addListener(async (rawMsg: unknown) => {
+    const req = rawMsg as {
+      address: string;
+      safety: { score: number; label: string; summary: string };
+      price: { usd: number; symbol: string } | null;
+      tweetContext?: TweetContext | null;
+    };
     try {
       const system = "You are a concise DeFi analyst for Solana traders. Write 1-2 sentences about the token's risk and key facts. Be direct. No disclaimers.";
+
+      let tweetContextStr = "";
+      if (req.tweetContext) {
+        const parts: string[] = [];
+        if (req.tweetContext.authorHandle) parts.push(`Author: @${req.tweetContext.authorHandle}${req.tweetContext.verified ? " (verified)" : ""}`);
+        if (req.tweetContext.likes !== null) parts.push(`Likes: ${req.tweetContext.likes.toLocaleString()}`);
+        if (req.tweetContext.retweets !== null) parts.push(`Retweets: ${req.tweetContext.retweets.toLocaleString()}`);
+        if (req.tweetContext.tweetText) parts.push(`Tweet: "${req.tweetContext.tweetText.slice(0, 200)}"`);
+        if (parts.length) tweetContextStr = `\nSocial context:\n${parts.join("\n")}`;
+      }
+
       const user = [
         `Token address: ${req.address}`,
         `Safety score: ${req.safety.score}/100 (${req.safety.label})`,
         `Details: ${req.safety.summary}`,
         req.price ? `Price: $${req.price.usd.toFixed(6)} (${req.price.symbol})` : "Price: unavailable",
-      ].join("\n");
+      ].join("\n") + tweetContextStr;
 
       const resp = await fetch(`${WORKER_URL}/ai/fast`, {
         method: "POST",
@@ -314,8 +348,17 @@ async function handleMessage(msg: BgRequest, respond: (r: BgResponse) => void): 
     }
 
     if (msg.type === "set_wallet") {
+      const prevAddress = walletState.address;
       walletState = msg.wallet;
       await chrome.storage.local.set({ wallet: walletState });
+
+      // Clear portfolio cache on disconnect or address change
+      if (!walletState.connected || walletState.address !== prevAddress) {
+        if (prevAddress) {
+          chrome.storage.session.remove(`portfolio_${prevAddress}`).catch(() => {});
+        }
+      }
+
       respond({ ok: true, data: null });
       return;
     }
@@ -358,7 +401,12 @@ async function handleMessage(msg: BgRequest, respond: (r: BgResponse) => void): 
 
     if (msg.type === "get_watchlist_prices") {
       const ids = msg.mints.join(",");
-      const resp = await fetch(`${WORKER_URL}/defi/jupiter/price?ids=${ids}`);
+      const resp = await fetch(`${WORKER_URL}/defi/jupiter/price?ids=${ids}`, {
+        headers: {
+          "X-Quickdraw-Client": "extension",
+          "Authorization": `Bearer ${EXTENSION_SECRET}`,
+        },
+      });
       if (!resp.ok) {
         respond({ ok: false, error: "Price fetch failed" });
         return;
@@ -440,22 +488,97 @@ async function handleMessage(msg: BgRequest, respond: (r: BgResponse) => void): 
         respond({ ok: false, error: result?.error ?? "Wallet connect returned no result" });
         return;
       }
-      const w: WalletState = { address: result.address!, adapter: "injected", connected: true };
+      if (!result.address) {
+        respond({ ok: false, error: "Wallet returned no address" });
+        return;
+      }
+      const w: WalletState = { address: result.address, adapter: "injected", connected: true };
       walletState = w;
       await chrome.storage.local.set({ wallet: w });
       respond({ ok: true, data: w });
       return;
     }
 
-    if (msg.type === "quote") {
-      const quote = await fetchQuoteFromWorker(msg.inputMint, msg.outputMint, msg.amountLamports);
-      respond({ ok: true, data: quote });
+    if (msg.type === "quote_multi") {
+      const [jupiterResult, raydiumResult] = await Promise.allSettled([
+        fetchQuoteFromWorker(msg.inputMint, msg.outputMint, msg.amountLamports),
+        fetchRaydiumQuote(msg.inputMint, msg.outputMint, msg.amountLamports),
+      ]);
+
+      const quotes: AdapterQuote[] = [];
+
+      if (jupiterResult.status === "fulfilled") {
+        const jup = jupiterResult.value as {
+          outAmount: string;
+          priceImpactPct: number;
+          routePlan?: Array<{ swapInfo: { label: string } }>;
+        };
+        quotes.push({
+          adapter: "jupiter",
+          outAmount: jup.outAmount ?? "0",
+          priceImpactPct: Number(jup.priceImpactPct ?? 0),
+          routeLabel: jup.routePlan?.[0]?.swapInfo?.label ?? "Jupiter",
+        });
+      }
+
+      if (raydiumResult.status === "fulfilled" && raydiumResult.value) {
+        quotes.push(raydiumResult.value);
+      }
+
+      if (!quotes.length) {
+        respond({ ok: false, error: "No quotes available" });
+        return;
+      }
+
+      const ranked = rankQuotes(quotes);
+      const result: MultiAdapterQuote = { best: ranked[0], all: ranked };
+      respond({ ok: true, data: result });
       return;
     }
 
-    if (msg.type === "swap_tx") {
-      const txBase64 = await buildSwapTxFromWorker(msg.inputMint, msg.outputMint, msg.amountLamports, msg.walletAddress);
-      respond({ ok: true, data: txBase64 });
+    if (msg.type === "get_portfolio") {
+      await walletReady;
+      if (!walletState.connected || !walletState.address) {
+        respond({ ok: false, error: "No wallet connected" });
+        return;
+      }
+
+      const cacheKey = `portfolio_${walletState.address}`;
+
+      // Try cache first — any storage error falls through to live fetch
+      try {
+        const cached = await chrome.storage.session.get(cacheKey);
+        if (cached[cacheKey]) {
+          const entry = cached[cacheKey] as { data: PortfolioItem[]; expiresAt: number };
+          if (Date.now() < entry.expiresAt) {
+            respond({ ok: true, data: entry.data });
+            return;
+          }
+        }
+      } catch { /* storage unavailable — fall through to live fetch */ }
+
+      const resp = await fetch(
+        `${WORKER_URL}/defi/helius/portfolio?wallet=${encodeURIComponent(walletState.address)}`,
+        {
+          headers: {
+            "X-Quickdraw-Client": "extension",
+            "Authorization": `Bearer ${EXTENSION_SECRET}`,
+          },
+        },
+      );
+      if (!resp.ok) throw new Error("Portfolio fetch failed");
+      const rawData = await resp.json();
+      if (!Array.isArray(rawData)) throw new Error("Unexpected portfolio response");
+      const data = rawData as PortfolioItem[];
+
+      // Write to cache — failure here is non-fatal
+      try {
+        await chrome.storage.session.set({
+          [cacheKey]: { data, expiresAt: Date.now() + 30_000 },
+        });
+      } catch { /* storage write failed — data still returned */ }
+
+      respond({ ok: true, data });
       return;
     }
 
