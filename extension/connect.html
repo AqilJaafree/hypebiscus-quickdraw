@@ -15,14 +15,18 @@
     p  { font-size: 11px; color: #555; }
     #status { font-size: 11px; color: #8bf542; min-height: 16px; }
     #error  { font-size: 11px; color: #f54242; min-height: 16px; }
+    #close-btn { display: none; background: #222; color: #f5f0e8; border: 2px solid #555;
+      padding: 6px 12px; font-family: monospace; font-size: 11px; cursor: pointer; margin-top: 4px; }
+    #close-btn:hover { border-color: #f5e642; }
   </style>
 </head>
 <body>
   <div class="card">
     <h1>QUICKDRAW</h1>
     <p>Connect with email or an existing wallet. This tab will close automatically once connected.</p>
-    <div id="status">Opening wallet modal…</div>
+    <div id="status">Follow the prompts to connect…</div>
     <div id="error"></div>
+    <button id="close-btn" onclick="window.close()">Close this tab</button>
   </div>
   <script type="module" src="dist/connect.js"></script>
 </body>

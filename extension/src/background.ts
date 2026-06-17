@@ -436,8 +436,12 @@ async function handleMessage(msg: BgRequest, respond: (r: BgResponse) => void): 
 
     if (msg.type === "connect_wallet_reown") {
       const connectUrl = chrome.runtime.getURL("connect.html");
-      await chrome.tabs.create({ url: connectUrl, active: true });
-      respond({ ok: true, data: null });
+      try {
+        await chrome.tabs.create({ url: connectUrl, active: true });
+        respond({ ok: true, data: null });
+      } catch (e) {
+        respond({ ok: false, error: String(e) });
+      }
       return;
     }
 

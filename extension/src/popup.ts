@@ -165,16 +165,20 @@ function init(): void {
   const connectBtn = document.getElementById("connect-btn") as HTMLButtonElement;
   let currentWallet: WalletState = { address: null, adapter: null, connected: false };
 
+  const reownBtn = document.getElementById("connect-reown-btn") as HTMLButtonElement | null;
+
   function renderConnectBtn(w: WalletState): void {
     currentWallet = w;
     if (w.connected && w.address) {
       connectBtn.textContent = `${w.address.slice(0, 6)}…${w.address.slice(-4)}`;
       connectBtn.classList.add("connected");
       connectBtn.disabled = false;
+      if (reownBtn) reownBtn.style.display = "none";
     } else {
       connectBtn.textContent = "Connect Wallet";
       connectBtn.classList.remove("connected");
       connectBtn.disabled = false;
+      if (reownBtn) reownBtn.style.display = "";
     }
   }
 
@@ -225,7 +229,7 @@ function init(): void {
       });
   });
 
-  document.getElementById("connect-reown-btn")?.addEventListener("click", () => {
+  reownBtn?.addEventListener("click", () => {
     sendBg({ type: "connect_wallet_reown" }).catch(() => {});
     window.close();
   });
