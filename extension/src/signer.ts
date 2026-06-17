@@ -1,39 +1,29 @@
 // Runs in the MAIN world of an active tab.
-// Background sets window.__QD_PENDING__ before injecting this file,
-// then reads window.__QD_RESULT__ after injection completes.
+// Background injects this file to define __QD_SIGN__, then calls it via a
+// second executeScript({ func }) call which correctly awaits the returned Promise.
 import { VersionedTransaction } from "@solana/web3.js";
 
-(async () => {
-  const w = window as Record<string, unknown>;
-  const pending = w.__QD_PENDING__ as { txBase64: string } | undefined;
-  if (!pending) {
-    w.__QD_RESULT__ = { ok: false, error: "No pending swap" };
-    return;
-  }
+type SignResult = { ok: true; signature: string } | { ok: false; error: string };
 
+async function __QD_SIGN__(txBase64: string): Promise<SignResult> {
   try {
-    const bytes = Uint8Array.from(atob(pending.txBase64), c => c.charCodeAt(0));
+    const w = window as Record<string, unknown>;
+    const bytes = Uint8Array.from(atob(txBase64), c => c.charCodeAt(0));
     const tx = VersionedTransaction.deserialize(bytes);
 
-    type Provider = {
-      signAndSendTransaction(tx: unknown): Promise<{ signature: string }>;
-    };
+    type Provider = { signAndSendTransaction(tx: unknown): Promise<{ signature: string }> };
     const phantom  = (w.phantom as Record<string, unknown>)?.solana as Provider | undefined;
     const solflare = w.solflare as Provider | undefined;
     const solana   = w.solana   as Provider | undefined;
     const provider = phantom ?? solflare ?? solana;
 
-    if (!provider) {
-      w.__QD_RESULT__ = { ok: false, error: "No wallet provider found in page" };
-      return;
-    }
+    if (!provider) return { ok: false, error: "No wallet provider" };
 
     const { signature } = await provider.signAndSendTransaction(tx);
-    w.__QD_RESULT__ = { ok: true, signature };
+    return { ok: true, signature };
   } catch (err) {
-    w.__QD_RESULT__ = {
-      ok: false,
-      error: err instanceof Error ? err.message : String(err),
-    };
+    return { ok: false, error: err instanceof Error ? err.message : String(err) };
   }
-})();
+}
+
+(window as Record<string, unknown>).__QD_SIGN__ = __QD_SIGN__;

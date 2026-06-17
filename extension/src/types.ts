@@ -137,7 +137,7 @@ export type BgRequest =
   | { type: "get_portfolio" }
   | { type: "connect_wallet_reown" }
   | { type: "connect_wallet_injected" }
-  | { type: "execute_swap"; adapter: "jupiter" | "raydium"; inputMint: string; outputMint: string; amountLamports: number; walletAddress: string };
+  | { type: "execute_swap"; inputMint: string; outputMint: string; amountLamports: number; walletAddress: string };
 
 export interface SwapResult {
   signature: string;

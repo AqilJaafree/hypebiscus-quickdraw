@@ -319,6 +319,14 @@ chrome.runtime.onConnect.addListener((port) => {
   });
 });
 
+// ── Tab helper ─────────────────────────────────────────────────────────────────
+async function findUsableTab(): Promise<chrome.tabs.Tab | undefined> {
+  const win = await chrome.windows.getLastFocused({ windowTypes: ["normal"] });
+  const tabs = await chrome.tabs.query({ windowId: win.id });
+  const isUsable = (t: chrome.tabs.Tab): boolean => !!t.url?.match(/^https?:\/\//);
+  return tabs.find(t => t.active && isUsable(t)) ?? tabs.find(isUsable);
+}
+
 // ── Message handler ────────────────────────────────────────────────────────────
 chrome.runtime.onMessage.addListener(
   (msg: BgRequest, _sender, sendResponse: (r: BgResponse) => void) => {
@@ -447,13 +455,7 @@ async function handleMessage(msg: BgRequest, respond: (r: BgResponse) => void): 
 
     if (msg.type === "connect_wallet_injected") {
       console.log("[QD bg] connect_wallet_injected received");
-      const win = await chrome.windows.getLastFocused({ windowTypes: ["normal"] });
-      const allTabs = await chrome.tabs.query({ windowId: win.id });
-      // Prefer the active tab if it's http/https; otherwise take the first usable tab.
-      // chrome:// and chrome-extension:// pages can't receive scripting injection.
-      const isUsable = (t: chrome.tabs.Tab) => !!t.url?.match(/^https?:\/\//);
-      const activeTab = allTabs.find(t => t.active && isUsable(t));
-      const tab = activeTab ?? allTabs.find(isUsable);
+      const tab = await findUsableTab();
       console.log("[QD bg] using tab id:", tab?.id, tab?.url);
       if (!tab?.id) {
         respond({ ok: false, error: "Open any webpage (http/https) then try again." });
@@ -628,55 +630,40 @@ async function handleMessage(msg: BgRequest, respond: (r: BgResponse) => void): 
       const { txBase64 } = await swapResp.json() as { txBase64: string };
 
       // 2. Find a usable (http/https) tab in the last focused window
-      const win = await chrome.windows.getLastFocused({ windowTypes: ["normal"] });
-      const allTabs = await chrome.tabs.query({ windowId: win.id });
-      const isUsable = (t: chrome.tabs.Tab) => !!t.url?.match(/^https?:\/\//);
-      const activeTab = allTabs.find(t => t.active && isUsable(t));
-      const tab = activeTab ?? allTabs.find(isUsable);
+      const tab = await findUsableTab();
       if (!tab?.id) {
         respond({ ok: false, error: "Open any webpage (http/https) then try again." });
         return;
       }
 
-      // 3. Set window.__QD_PENDING__ in the MAIN world before injecting signer
-      await chrome.scripting.executeScript({
-        target: { tabId: tab.id },
-        world: "MAIN",
-        func: (pendingTxBase64: string) => {
-          (window as Record<string, unknown>).__QD_PENDING__ = { txBase64: pendingTxBase64 };
-          (window as Record<string, unknown>).__QD_RESULT__ = undefined;
-        },
-        args: [txBase64],
-      });
-
-      // 4. Inject the bundled signer (which reads __QD_PENDING__ and writes __QD_RESULT__)
+      // 3. Define __QD_SIGN__ in the MAIN world (sync top-level assignment, safe with files:[])
       await chrome.scripting.executeScript({
         target: { tabId: tab.id },
         world: "MAIN",
         files: ["dist/signer.js"],
       });
 
-      // 5. Read __QD_RESULT__ back from the MAIN world
-      const readResults = await chrome.scripting.executeScript({
+      // 4. Call __QD_SIGN__ — executeScript awaits a returned Promise from func
+      type SignResult = { ok: true; signature: string } | { ok: false; error: string };
+      const signerResults = await chrome.scripting.executeScript({
         target: { tabId: tab.id },
         world: "MAIN",
-        func: (): unknown => (window as Record<string, unknown>).__QD_RESULT__,
+        func: (txBase64: string): Promise<SignResult> => {
+          type SignFn = (txBase64: string) => Promise<SignResult>;
+          return ((window as Record<string, unknown>).__QD_SIGN__ as SignFn)(txBase64);
+        },
+        args: [txBase64],
       });
 
-      const signerResult = readResults[0]?.result as
-        | { ok: true; signature: string }
-        | { ok: false; error: string }
-        | undefined;
-
+      const signerResult = signerResults[0]?.result as SignResult | undefined;
       if (!signerResult?.ok) {
         respond({ ok: false, error: (signerResult as { ok: false; error: string } | undefined)?.error ?? "Signer returned no result" });
         return;
       }
 
-      const { signature } = signerResult as { ok: true; signature: string };
       const result: SwapResult = {
-        signature,
-        explorer: `https://solscan.io/tx/${signature}`,
+        signature: signerResult.signature,
+        explorer: `https://solscan.io/tx/${signerResult.signature}`,
       };
       respond({ ok: true, data: result });
       return;
