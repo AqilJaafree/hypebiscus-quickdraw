@@ -511,6 +511,9 @@ export default {
       if (url.pathname === "/defi/helius/portfolio") {
         return handleHeliusPortfolio(url, env);
       }
+      if (url.pathname === "/defi/jupiter/swap" && req.method === "POST") {
+        return handleJupiterSwap(req);
+      }
       return err("Not found", 404);
     }
 
