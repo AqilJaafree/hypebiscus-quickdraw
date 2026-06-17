@@ -1,7 +1,7 @@
 import { detectInSelection, detectInText } from "./detector";
 import { createPopup, removePopup, PopupController } from "./popup-ui";
 import { sendBg } from "./shared";
-import type { TokenData } from "./types";
+import type { TokenData, WalletState } from "./types";
 import { extractTweetContext } from "./tweet-context";
 import type { TweetContext } from "./tweet-context";
 import { getSiteMode, defaultMode } from "./detection-rules";
@@ -59,11 +59,13 @@ async function triggerAddress(address: string, rawX: number, rawY: number, sourc
       onDismiss: () => { activeController = null; },
       onGear: () => { chrome.runtime.sendMessage({ type: "OPEN_POPUP" }).catch(() => {}); },
       onBuy: () => {
-        const ticker = tokenData?.price?.symbol;
-        window.open(
-          ticker ? `https://jup.ag/swap/SOL-${ticker}` : `https://jup.ag/swap/SOL-${address}`,
-          "_blank",
-        );
+        const ticker = tokenData?.price?.symbol ?? address.slice(0, 6);
+        chrome.storage.local.get("wallet").then(({ wallet }) => {
+          const w: WalletState = wallet ?? { address: null, adapter: null, connected: false };
+          void controller.showTradePanel(address, ticker, w);
+        }).catch(() => {
+          void controller.showTradePanel(address, ticker, { address: null, adapter: null, connected: false });
+        });
       },
     },
   });
