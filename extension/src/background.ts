@@ -5,7 +5,7 @@ import type {
   BgRequest, BgResponse, SafetyScore, TokenData, TokenPrice,
   WalletState, PriceAlert, WatchItem, WatchItemWithPrice, SkillSettings,
   DeepPortRequest, DeepPortMessage, AdapterQuote, MultiAdapterQuote,
-  PortfolioItem, SwapResult,
+  PortfolioItem, SwapResult, PendingSwap,
 } from "./types";
 import { DEFAULT_SKILL_SETTINGS } from "./types";
 import type { TweetContext } from "./tweet-context";
@@ -629,21 +629,66 @@ async function handleMessage(msg: BgRequest, respond: (r: BgResponse) => void): 
       }
       const { txBase64 } = await swapResp.json() as { txBase64: string };
 
-      // 2. Find a usable (http/https) tab in the last focused window
+      // 2. Branch on wallet adapter — Reown uses a dedicated sign tab
+      const { wallet: storedWallet } = await chrome.storage.local.get("wallet") as
+        { wallet?: { adapter: string | null } };
+
+      if (storedWallet?.adapter === "reown") {
+        // Reown embedded wallet: sign via dedicated extension tab
+        const pending: PendingSwap = {
+          txBase64,
+          adapter: "jupiter",
+          expiresAt: Date.now() + 60_000,
+        };
+        await chrome.storage.session.set({ pendingSwap: pending, swapResult: undefined });
+
+        const signUrl = chrome.runtime.getURL("sign.html");
+        try {
+          await chrome.tabs.create({ url: signUrl, active: true });
+        } catch (e) {
+          respond({ ok: false, error: `Could not open sign tab: ${String(e)}` });
+          return;
+        }
+
+        // Poll chrome.storage.session for result (sign tab writes swapResult and closes)
+        const result = await new Promise<SwapResult>((resolve, reject) => {
+          const timeout = setTimeout(() => {
+            clearInterval(interval);
+            reject(new Error("Signing timed out (90s)"));
+          }, 90_000);
+          const interval = setInterval(async () => {
+            try {
+              const { swapResult } = await chrome.storage.session.get("swapResult") as
+                { swapResult?: { signature?: string; explorer?: string; error?: string } };
+              if (!swapResult) return;
+              clearInterval(interval);
+              clearTimeout(timeout);
+              await chrome.storage.session.remove("swapResult");
+              if (swapResult.error) reject(new Error(swapResult.error));
+              else resolve({ signature: swapResult.signature!, explorer: swapResult.explorer! });
+            } catch { /* storage read error — keep polling */ }
+          }, 500);
+        });
+
+        respond({ ok: true, data: result });
+        return;
+      }
+
+      // 3. Find a usable (http/https) tab in the last focused window (injected wallet path)
       const tab = await findUsableTab();
       if (!tab?.id) {
         respond({ ok: false, error: "Open any webpage (http/https) then try again." });
         return;
       }
 
-      // 3. Define __QD_SIGN__ in the MAIN world (sync top-level assignment, safe with files:[])
+      // 4. Define __QD_SIGN__ in the MAIN world (sync top-level assignment, safe with files:[])
       await chrome.scripting.executeScript({
         target: { tabId: tab.id },
         world: "MAIN",
         files: ["dist/signer.js"],
       });
 
-      // 4. Call __QD_SIGN__ — executeScript awaits a returned Promise from func
+      // 5. Call __QD_SIGN__ — executeScript awaits a returned Promise from func
       type SignResult = { ok: true; signature: string } | { ok: false; error: string };
       const signerResults = await chrome.scripting.executeScript({
         target: { tabId: tab.id },
