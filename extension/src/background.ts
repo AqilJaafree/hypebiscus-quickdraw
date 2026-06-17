@@ -640,7 +640,8 @@ async function handleMessage(msg: BgRequest, respond: (r: BgResponse) => void): 
           adapter: "jupiter",
           expiresAt: Date.now() + 60_000,
         };
-        await chrome.storage.session.set({ pendingSwap: pending, swapResult: undefined });
+        await chrome.storage.session.remove("swapResult");
+        await chrome.storage.session.set({ pendingSwap: pending });
 
         const signUrl = chrome.runtime.getURL("sign.html");
         try {
@@ -665,7 +666,8 @@ async function handleMessage(msg: BgRequest, respond: (r: BgResponse) => void): 
               clearTimeout(timeout);
               await chrome.storage.session.remove("swapResult");
               if (swapResult.error) reject(new Error(swapResult.error));
-              else resolve({ signature: swapResult.signature!, explorer: swapResult.explorer! });
+              else if (!swapResult.signature || !swapResult.explorer) reject(new Error("Sign tab returned incomplete result"));
+              else resolve({ signature: swapResult.signature, explorer: swapResult.explorer });
             } catch { /* storage read error — keep polling */ }
           }, 500);
         });

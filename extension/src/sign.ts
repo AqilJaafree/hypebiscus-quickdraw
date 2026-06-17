@@ -57,7 +57,7 @@ async function main(): Promise<void> {
     const explorer = `https://solscan.io/tx/${signature}`;
 
     await chrome.storage.session.set({ swapResult: { signature, explorer } });
-    await chrome.storage.session.remove("pendingSwap");
+    await chrome.storage.session.remove("pendingSwap").catch(() => {});
 
     statusEl.textContent = `✓ Sent! ${signature.slice(0, 8)}…`;
     setTimeout(() => window.close(), 1500);
