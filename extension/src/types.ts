@@ -136,7 +136,19 @@ export type BgRequest =
   | { type: "quote_multi"; inputMint: string; outputMint: string; amountLamports: number }
   | { type: "get_portfolio" }
   | { type: "connect_wallet_reown" }
-  | { type: "connect_wallet_injected" };
+  | { type: "connect_wallet_injected" }
+  | { type: "execute_swap"; adapter: "jupiter" | "raydium"; inputMint: string; outputMint: string; amountLamports: number; walletAddress: string };
+
+export interface SwapResult {
+  signature: string;
+  explorer: string;
+}
+
+export interface PendingSwap {
+  txBase64: string;
+  adapter: "jupiter" | "raydium";
+  expiresAt: number;
+}
 
 export type BgResponse<T = unknown> =
   | { ok: true; data: T }

@@ -5,7 +5,7 @@ import type {
   BgRequest, BgResponse, SafetyScore, TokenData, TokenPrice,
   WalletState, PriceAlert, WatchItem, WatchItemWithPrice, SkillSettings,
   DeepPortRequest, DeepPortMessage, AdapterQuote, MultiAdapterQuote,
-  PortfolioItem,
+  PortfolioItem, SwapResult,
 } from "./types";
 import { DEFAULT_SKILL_SETTINGS } from "./types";
 import type { TweetContext } from "./tweet-context";
@@ -590,6 +590,95 @@ async function handleMessage(msg: BgRequest, respond: (r: BgResponse) => void): 
       } catch { /* storage write failed — data still returned */ }
 
       respond({ ok: true, data });
+      return;
+    }
+
+    if (msg.type === "execute_swap") {
+      await walletReady;
+      if (!walletState.connected || !walletState.address) {
+        respond({ ok: false, error: "No wallet connected" });
+        return;
+      }
+      if (walletState.address !== msg.walletAddress) {
+        respond({ ok: false, error: "Wallet address mismatch" });
+        return;
+      }
+
+      // 1. Fetch the unsigned swap transaction from the worker
+      const swapResp = await fetch(`${WORKER_URL}/defi/jupiter/swap`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Quickdraw-Client": "extension",
+          "Authorization": `Bearer ${EXTENSION_SECRET}`,
+        },
+        body: JSON.stringify({
+          inputMint: msg.inputMint,
+          outputMint: msg.outputMint,
+          amount: msg.amountLamports,
+          slippageBps: 50,
+          userPublicKey: msg.walletAddress,
+        }),
+      });
+      if (!swapResp.ok) {
+        const errText = await swapResp.text().catch(() => "Swap build failed");
+        respond({ ok: false, error: errText });
+        return;
+      }
+      const { txBase64 } = await swapResp.json() as { txBase64: string };
+
+      // 2. Find a usable (http/https) tab in the last focused window
+      const win = await chrome.windows.getLastFocused({ windowTypes: ["normal"] });
+      const allTabs = await chrome.tabs.query({ windowId: win.id });
+      const isUsable = (t: chrome.tabs.Tab) => !!t.url?.match(/^https?:\/\//);
+      const activeTab = allTabs.find(t => t.active && isUsable(t));
+      const tab = activeTab ?? allTabs.find(isUsable);
+      if (!tab?.id) {
+        respond({ ok: false, error: "Open any webpage (http/https) then try again." });
+        return;
+      }
+
+      // 3. Set window.__QD_PENDING__ in the MAIN world before injecting signer
+      await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        world: "MAIN",
+        func: (pendingTxBase64: string) => {
+          (window as Record<string, unknown>).__QD_PENDING__ = { txBase64: pendingTxBase64 };
+          (window as Record<string, unknown>).__QD_RESULT__ = undefined;
+        },
+        args: [txBase64],
+      });
+
+      // 4. Inject the bundled signer (which reads __QD_PENDING__ and writes __QD_RESULT__)
+      await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        world: "MAIN",
+        files: ["dist/signer.js"],
+      });
+
+      // 5. Read __QD_RESULT__ back from the MAIN world
+      const readResults = await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        world: "MAIN",
+        func: (): unknown => (window as Record<string, unknown>).__QD_RESULT__,
+      });
+
+      const signerResult = readResults[0]?.result as
+        | { ok: true; signature: string }
+        | { ok: false; error: string }
+        | undefined;
+
+      if (!signerResult?.ok) {
+        respond({ ok: false, error: (signerResult as { ok: false; error: string } | undefined)?.error ?? "Signer returned no result" });
+        return;
+      }
+
+      const { signature } = signerResult as { ok: true; signature: string };
+      const result: SwapResult = {
+        signature,
+        explorer: `https://solscan.io/tx/${signature}`,
+      };
+      respond({ ok: true, data: result });
       return;
     }
 
