@@ -102,7 +102,7 @@ export function buildTradePanel(
       const sellEl = el.querySelector<HTMLInputElement>("#qd-sell-amount");
       if (sellEl) {
         sellEl.value = heldBalance.toFixed(4);
-        state = { ...state, sellInput: sellEl.value, sellQuote: null };
+        state = { ...state, sellInput: sellEl.value, sellQuote: null, signSuccess: null, signError: null };
         void fetchSellQuote();
       }
     });
@@ -157,7 +157,7 @@ export function buildTradePanel(
   async function fetchSellQuote(): Promise<void> {
     const amount = parseFloat(state.sellInput || "0");
     if (amount <= 0) return;
-    state = { ...state, loading: true, error: null, sellQuote: null };
+    state = { ...state, loading: true, error: null, sellQuote: null, signSuccess: null, signError: null };
     render();
     try {
       const amountRaw = Math.floor(amount * 1_000_000); // assume 6 decimals; caller should pass decimals in a future task
@@ -184,7 +184,7 @@ export function buildTradePanel(
         type: "execute_swap",
         inputMint: outputMint,
         outputMint: SOL_MINT,
-        amountLamports: Math.floor(amount * 1_000_000),
+        amountLamports: Math.floor(amount * 1_000_000), // assume 6 decimals; caller should pass decimals in a future task
         walletAddress: wallet.address,
       });
       const explorer = result.explorer.startsWith("https://") ? result.explorer : "#";
