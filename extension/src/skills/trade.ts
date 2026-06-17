@@ -1,6 +1,6 @@
 import { DS, brutal } from "../styles";
 import { sendBg, esc } from "../shared";
-import type { MultiAdapterQuote, AdapterQuote, WalletState, SwapResult } from "../types";
+import type { MultiAdapterQuote, WalletState, SwapResult } from "../types";
 
 const SOL_MINT = "So11111111111111111111111111111111111111112";
 const LAMPORTS_PER_SOL = 1_000_000_000;
@@ -52,7 +52,7 @@ export function buildTradePanel(
 
     const input = el.querySelector<HTMLInputElement>("#qd-trade-sol");
     input?.addEventListener("change", () => {
-      state = { ...state, solInput: input.value, multiQuote: null, error: null };
+      state = { ...state, solInput: input.value, multiQuote: null, error: null, signSuccess: null, signError: null };
       fetchQuote();
     });
 
@@ -61,11 +61,12 @@ export function buildTradePanel(
     });
 
     el.querySelector("#qd-trade-swap")?.addEventListener("click", () => {
+      if (state.signing) return;
       if (!wallet.connected) {
         chrome.runtime.sendMessage({ type: "OPEN_POPUP" });
         return;
       }
-      if (state.multiQuote) void executeSwap(state.multiQuote.best);
+      if (state.multiQuote) void executeSwap();
       else void fetchQuote();
     });
   }
@@ -73,7 +74,7 @@ export function buildTradePanel(
   async function fetchQuote(): Promise<void> {
     const sol = parseFloat(state.solInput || "0");
     if (sol <= 0) return;
-    state = { ...state, loading: true, error: null, multiQuote: null };
+    state = { ...state, loading: true, error: null, multiQuote: null, signSuccess: null, signError: null };
     render();
     try {
       const amountLamports = Math.floor(sol * LAMPORTS_PER_SOL);
@@ -90,7 +91,7 @@ export function buildTradePanel(
     render();
   }
 
-  async function executeSwap(_quote: AdapterQuote): Promise<void> {
+  async function executeSwap(): Promise<void> {
     if (!wallet.connected || !wallet.address) return;
     state = { ...state, signing: true, signError: null, signSuccess: null };
     render();
@@ -102,7 +103,8 @@ export function buildTradePanel(
         amountLamports: Math.floor(parseFloat(state.solInput || "0") * LAMPORTS_PER_SOL),
         walletAddress: wallet.address,
       });
-      state = { ...state, signing: false, signSuccess: result.explorer };
+      const explorer = result.explorer.startsWith("https://") ? result.explorer : "#";
+      state = { ...state, signing: false, signSuccess: explorer };
     } catch (err: unknown) {
       state = { ...state, signing: false, signError: err instanceof Error ? err.message : "Swap failed" };
     }
