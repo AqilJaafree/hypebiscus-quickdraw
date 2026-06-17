@@ -5,11 +5,13 @@ const errorEl   = document.getElementById("error")     as HTMLElement;
 const closeBtn  = document.getElementById("close-btn") as HTMLButtonElement;
 
 async function main(): Promise<void> {
+  // Always show close button — user can dismiss the tab if they cancel the modal
+  closeBtn.style.display = "block";
+
   try {
     const unsub = subscribeReownWallet((wallet) => {
       if (wallet.connected && wallet.address) {
         statusEl.textContent = `Connected: ${wallet.address.slice(0, 6)}…${wallet.address.slice(-4)}`;
-        closeBtn.style.display = "block";
         unsub();
         setTimeout(() => window.close(), 1200);
       }
@@ -20,7 +22,6 @@ async function main(): Promise<void> {
     const msg = err instanceof Error ? err.message : "Unknown error";
     errorEl.textContent = msg;
     statusEl.textContent = "";
-    closeBtn.style.display = "block";
   }
 }
 

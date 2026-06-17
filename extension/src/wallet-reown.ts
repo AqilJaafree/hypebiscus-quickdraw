@@ -58,6 +58,15 @@ export function subscribeReownWallet(
     chrome.runtime.sendMessage({ type: "set_wallet", wallet: walletState }).catch(() => {});
   });
 
+  // Fire immediately if AppKit already has a restored session (page reload / SW restart case)
+  const currentAddress = m.getAddress();
+  if (currentAddress) {
+    const walletState: WalletState = { address: currentAddress, adapter: "reown", connected: true };
+    onUpdate(walletState);
+    chrome.storage.local.set({ wallet: walletState }).catch(() => {});
+    chrome.runtime.sendMessage({ type: "set_wallet", wallet: walletState }).catch(() => {});
+  }
+
   return unsub;
 }
 
