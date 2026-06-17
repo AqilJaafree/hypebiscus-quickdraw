@@ -1,6 +1,6 @@
 import { DS, brutal } from "../styles";
 import { sendBg, esc } from "../shared";
-import type { MultiAdapterQuote, AdapterQuote, WalletState } from "../types";
+import type { MultiAdapterQuote, AdapterQuote, WalletState, SwapResult } from "../types";
 
 const SOL_MINT = "So11111111111111111111111111111111111111112";
 const LAMPORTS_PER_SOL = 1_000_000_000;
@@ -23,6 +23,9 @@ interface TradeState {
   solInput: string;
   multiQuote: MultiAdapterQuote | null;
   loading: boolean;
+  signing: boolean;
+  signError: string | null;
+  signSuccess: string | null;
   error: string | null;
 }
 
@@ -34,7 +37,15 @@ export function buildTradePanel(
   const el = document.createElement("div");
   el.style.cssText = `padding:10px 12px;font-family:${DS.font};`;
 
-  let state: TradeState = { solInput: "0.5", multiQuote: null, loading: false, error: null };
+  let state: TradeState = {
+    solInput: "0.5",
+    multiQuote: null,
+    loading: false,
+    signing: false,
+    signError: null,
+    signSuccess: null,
+    error: null,
+  };
 
   function render(): void {
     el.innerHTML = buildTradeHTML(ticker, state, wallet);
@@ -54,8 +65,8 @@ export function buildTradePanel(
         chrome.runtime.sendMessage({ type: "OPEN_POPUP" });
         return;
       }
-      if (state.multiQuote) executeSwap(state.multiQuote.best);
-      else fetchQuote();
+      if (state.multiQuote) void executeSwap(state.multiQuote.best);
+      else void fetchQuote();
     });
   }
 
@@ -79,19 +90,30 @@ export function buildTradePanel(
     render();
   }
 
-  function executeSwap(quote: AdapterQuote): void {
-    if (quote.adapter === "raydium") {
-      window.open(`https://raydium.io/swap/?inputMint=${SOL_MINT}&outputMint=${outputMint}`, "_blank");
-    } else {
-      window.open(`https://jup.ag/swap/SOL-${outputMint}`, "_blank");
+  async function executeSwap(_quote: AdapterQuote): Promise<void> {
+    if (!wallet.connected || !wallet.address) return;
+    state = { ...state, signing: true, signError: null, signSuccess: null };
+    render();
+    try {
+      const result = await sendBg<SwapResult>({
+        type: "execute_swap",
+        inputMint: SOL_MINT,
+        outputMint,
+        amountLamports: Math.floor(parseFloat(state.solInput || "0") * LAMPORTS_PER_SOL),
+        walletAddress: wallet.address,
+      });
+      state = { ...state, signing: false, signSuccess: result.explorer };
+    } catch (err: unknown) {
+      state = { ...state, signing: false, signError: err instanceof Error ? err.message : "Swap failed" };
     }
+    render();
   }
 
   render();
   return el;
 }
 
-function buildTradeHTML(ticker: string, state: TradeState, wallet: WalletState): string {
+export function buildTradeHTML(ticker: string, state: TradeState, wallet: WalletState): string {
   const quoteRows = state.multiQuote
     ? state.multiQuote.all.map((q, i) => `
       <div style="display:flex;justify-content:space-between;align-items:center;
@@ -109,7 +131,20 @@ function buildTradeHTML(ticker: string, state: TradeState, wallet: WalletState):
         ? `<div style="font-size:10px;color:#555;padding:8px;">fetching quotes…</div>`
         : `<div style="font-size:10px;color:#555;padding:8px;">—</div>`);
 
-  const swapLabel = !wallet.connected ? "CONNECT WALLET FIRST" : "SWAP NOW ↗";
+  const swapLabel = !wallet.connected
+    ? "CONNECT WALLET FIRST"
+    : state.signing
+    ? "SIGNING…"
+    : "SWAP NOW";
+
+  const statusBlock = state.signSuccess
+    ? `<div style="font-size:10px;color:#8bf542;padding:6px 0;">
+        ✓ Swap sent! <a href="${esc(state.signSuccess)}" target="_blank"
+          style="color:#8bf542;">View on Solscan ↗</a>
+       </div>`
+    : state.signError
+    ? `<div class="qd-tr-err">⚠ ${esc(state.signError)}</div>`
+    : "";
 
   return `
 <style>
@@ -123,6 +158,7 @@ function buildTradeHTML(ticker: string, state: TradeState, wallet: WalletState):
   .qd-tr-err { font-size:10px; color:${DS.danger}; margin-bottom:6px; }
   .qd-tr-swap { width:100%; ${brutal(DS.yellow)}; color:#000; padding:9px; font-size:11px;
     font-weight:700; letter-spacing:0.06em; cursor:pointer; font-family:${DS.font}; }
+  .qd-tr-swap:disabled { opacity:0.5; cursor:not-allowed; }
 </style>
 <div class="qd-tr-label">BUY ${esc(ticker)}</div>
 <div class="qd-tr-row">
@@ -132,5 +168,6 @@ function buildTradeHTML(ticker: string, state: TradeState, wallet: WalletState):
 </div>
 <div class="qd-tr-quotes">${quoteRows}</div>
 ${state.error ? `<div class="qd-tr-err">⚠ ${esc(state.error)}</div>` : ""}
-<button id="qd-trade-swap" class="qd-tr-swap">${esc(swapLabel)}</button>`;
+${statusBlock}
+<button id="qd-trade-swap" class="qd-tr-swap" ${state.signing ? "disabled" : ""}>${esc(swapLabel)}</button>`;
 }
