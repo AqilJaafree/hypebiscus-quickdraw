@@ -434,6 +434,13 @@ async function handleMessage(msg: BgRequest, respond: (r: BgResponse) => void): 
       return;
     }
 
+    if (msg.type === "connect_wallet_reown") {
+      const connectUrl = chrome.runtime.getURL("connect.html");
+      await chrome.tabs.create({ url: connectUrl, active: true });
+      respond({ ok: true, data: null });
+      return;
+    }
+
     if (msg.type === "connect_wallet_injected") {
       console.log("[QD bg] connect_wallet_injected received");
       const win = await chrome.windows.getLastFocused({ windowTypes: ["normal"] });

@@ -225,6 +225,11 @@ function init(): void {
       });
   });
 
+  document.getElementById("connect-reown-btn")?.addEventListener("click", () => {
+    sendBg({ type: "connect_wallet_reown" }).catch(() => {});
+    window.close();
+  });
+
   // ── Async state load ───────────────────────────────────────────────────────
   let sessionIntervalId: ReturnType<typeof setInterval> | null = null;
 

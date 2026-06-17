@@ -135,6 +135,7 @@ export type BgRequest =
   | { type: "set_skill_settings"; settings: SkillSettings }
   | { type: "quote_multi"; inputMint: string; outputMint: string; amountLamports: number }
   | { type: "get_portfolio" }
+  | { type: "connect_wallet_reown" }
   | { type: "connect_wallet_injected" };
 
 export type BgResponse<T = unknown> =
