@@ -1,7 +1,5 @@
 import { sendBg, esc } from "./shared";
 import type { WalletState, PortfolioItem, SkillSettings } from "./types";
-import { getSiteMode, setSiteMode } from "./detection-rules";
-import type { SiteMode } from "./detection-rules";
 
 function formatDuration(ms: number): string {
   const s = Math.floor(ms / 1000);
@@ -54,8 +52,6 @@ async function loadPortfolio(wallet: WalletState): Promise<void> {
   }
 }
 
-let currentHostname = "";
-
 function init(): void {
   // ── Close ──────────────────────────────────────────────────────────────────
   document.getElementById("close-btn")?.addEventListener("click", () => window.close());
@@ -97,93 +93,57 @@ function init(): void {
   const lastSeenEl    = document.getElementById("last-seen") as HTMLElement;
   const sessionTimeEl = document.getElementById("session-time") as HTMLElement;
 
-  // ── AI mode toggle ─────────────────────────────────────────────────────────
-  const aiModes = ["auto", "cloud", "local"] as const;
-  type AiMode = typeof aiModes[number];
-  const aiButtons = ["ai-auto", "ai-cloud", "ai-local"].map(
-    id => document.getElementById(id) as HTMLButtonElement,
-  );
-  function renderAiMode(mode: AiMode): void {
-    const idx = aiModes.indexOf(mode);
-    aiButtons.forEach((b, i) => b.classList.toggle("active", i === idx));
-  }
-  aiButtons.forEach((btn, i) => {
-    btn.addEventListener("click", async () => {
-      renderAiMode(aiModes[i]);
-      try {
-        const settings = await sendBg<SkillSettings>({ type: "get_skill_settings" });
-        await sendBg({ type: "set_skill_settings", settings: { ...settings, aiMode: aiModes[i] } });
-      } catch { /* non-fatal */ }
-    });
+  // ── Skills + AI mode ───────────────────────────────────────────────────────
+  // AI mode is locked to Auto (Cloud/Local are disabled in the popup). The
+  // Jupiter Swap skill maps to SkillSettings.trade; the other skills are
+  // placeholders (disabled switches, no handlers).
+  const jupiterToggle = document.getElementById("toggle-jupiter") as HTMLButtonElement;
+
+  jupiterToggle.addEventListener("click", async () => {
+    const next = !jupiterToggle.classList.contains("on");
+    jupiterToggle.classList.toggle("on", next);
+    try {
+      const cur = await sendBg<SkillSettings>({ type: "get_skill_settings" });
+      await sendBg({ type: "set_skill_settings", settings: { ...cur, trade: next } });
+    } catch { /* non-fatal */ }
   });
+
   sendBg<SkillSettings>({ type: "get_skill_settings" })
-    .then(s => renderAiMode((s.aiMode ?? "auto") as AiMode))
+    .then(settings => {
+      jupiterToggle.classList.toggle("on", settings.trade !== false);
+      // Keep stored AI mode consistent with the locked Auto UI.
+      if (settings.aiMode !== "auto") {
+        sendBg({ type: "set_skill_settings", settings: { ...settings, aiMode: "auto" } }).catch(() => {});
+      }
+    })
     .catch(() => {});
 
-  // ── Site detection rules ───────────────────────────────────────────────────
-  const hostnameEl = document.getElementById("site-hostname") as HTMLElement;
-  const siteBtns = [
-    document.getElementById("site-aggressive") as HTMLButtonElement,
-    document.getElementById("site-selection") as HTMLButtonElement,
-    document.getElementById("site-off") as HTMLButtonElement,
-  ];
-  const siteModes: SiteMode[] = ["aggressive", "selection", "off"];
-
-  function renderSiteMode(mode: SiteMode): void {
-    const idx = siteModes.indexOf(mode);
-    siteBtns.forEach((b, i) => b.classList.toggle("active", i === idx));
-  }
-
-  async function saveSiteMode(mode: SiteMode): Promise<void> {
-    if (!currentHostname) return;
-    await setSiteMode(currentHostname, mode);
-    renderSiteMode(mode);
-  }
-
-  // Bind once — handlers read currentHostname at click time
-  siteBtns.forEach((btn, i) => {
-    btn.addEventListener("click", () => {
-      if (currentHostname) saveSiteMode(siteModes[i]);
-    });
-  });
-
-  async function loadSiteRule(): Promise<void> {
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (!tab?.url) return;
-    try { currentHostname = new URL(tab.url).hostname; } catch { return; }
-    hostnameEl.textContent = currentHostname;
-    const mode = await getSiteMode(currentHostname);
-    renderSiteMode(mode);
-  }
-
-  loadSiteRule();
-
-  // ── Wallet connect (storage-based) ─────────────────────────────────────────
-  // The popup fires the connect request and then watches chrome.storage.local
-  // for the wallet key. Background writes wallet to storage after the injected
-  // wallet connects — the popup updates whether it's still open or reopened.
+  // ── Wallet connect ─────────────────────────────────────────────────────────
+  // One button: opens the hosted connect page which handles all wallet types
+  // (Phantom, Solflare, email, WalletConnect). The page posts back via postMessage
+  // → content script → background → chrome.storage.local. The storage watcher
+  // below picks up the result when the connect tab closes.
   const connectBtn = document.getElementById("connect-btn") as HTMLButtonElement;
   let currentWallet: WalletState = { address: null, adapter: null, connected: false };
-
-  const reownBtn = document.getElementById("connect-reown-btn") as HTMLButtonElement | null;
 
   function renderConnectBtn(w: WalletState): void {
     currentWallet = w;
     if (w.connected && w.address) {
-      connectBtn.textContent = `${w.address.slice(0, 6)}…${w.address.slice(-4)}`;
+      const short = `${w.address.slice(0, 6)}…${w.address.slice(-4)}`;
+      const label = w.adapter === "reown" ? "email/wc" : "phantom";
+      connectBtn.textContent = `${short} [${label}]`;
+      connectBtn.title = `${w.address}\nClick to disconnect`;
       connectBtn.classList.add("connected");
       connectBtn.disabled = false;
-      if (reownBtn) reownBtn.style.display = "none";
     } else {
       connectBtn.textContent = "Connect Wallet";
+      connectBtn.title = "";
       connectBtn.classList.remove("connected");
       connectBtn.disabled = false;
-      if (reownBtn) reownBtn.style.display = "";
     }
   }
 
-  // Watch storage — background writes wallet here after injected wallet connects.
-  // This fires whether the popup is still open or was reopened after Phantom dialog.
+  // Watch storage — fires when the connect page posts wallet state back.
   chrome.storage.onChanged.addListener((changes, area) => {
     if (area !== "local" || !changes.wallet) return;
     const w = (changes.wallet.newValue ?? { address: null, adapter: null, connected: false }) as WalletState;
@@ -193,43 +153,12 @@ function init(): void {
 
   connectBtn.addEventListener("click", () => {
     if (currentWallet.connected) {
-      // Disconnect — write directly to storage, watcher updates the button
       const w: WalletState = { address: null, adapter: null, connected: false };
       chrome.storage.local.set({ wallet: w });
       sendBg({ type: "set_wallet", wallet: w }).catch(() => {});
+      window.close();
       return;
     }
-
-    // Fire connect request to background — don't await.
-    // Background finds the active browser tab (via getLastFocused windowTypes:["normal"]),
-    // tells its content script to call window.phantom.solana.connect(),
-    // then writes the wallet to chrome.storage.local.
-    // The storage watcher above picks up the result.
-    connectBtn.textContent = "Connecting…";
-    connectBtn.disabled = true;
-    console.log("[QD popup] sending connect_wallet_injected");
-
-    chrome.runtime.sendMessage({ type: "connect_wallet_injected" })
-      .then((resp: { ok: boolean; data?: WalletState; error?: string } | undefined) => {
-        console.log("[QD popup] connect response:", resp);
-        if (!resp?.ok) {
-          const msg = resp?.error ?? "unknown error";
-          connectBtn.textContent = msg.slice(0, 28) + (msg.length > 28 ? "…" : "");
-          connectBtn.disabled = false;
-          setTimeout(() => renderConnectBtn(currentWallet), 2500);
-        } else if (resp.data) {
-          // Render immediately from the response — don't wait for storage.onChanged,
-          // which won't fire if the popup closed during the Phantom approval dialog.
-          renderConnectBtn(resp.data);
-        }
-      })
-      .catch((err: unknown) => {
-        console.error("[QD popup] sendMessage threw:", err);
-        renderConnectBtn(currentWallet);
-      });
-  });
-
-  reownBtn?.addEventListener("click", () => {
     sendBg({ type: "connect_wallet_reown" }).catch(() => {});
     window.close();
   });
