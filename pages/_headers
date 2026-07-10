@@ -1,0 +1,4 @@
+/*
+  Cross-Origin-Opener-Policy: same-origin-allow-popups
+  Cross-Origin-Embedder-Policy: unsafe-none
+  Content-Security-Policy: default-src 'self' 'unsafe-inline' https: wss:; img-src 'self' data: blob: https:; connect-src 'self' https: wss: blob:
