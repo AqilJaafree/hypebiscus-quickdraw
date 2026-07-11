@@ -168,3 +168,12 @@ observer.observe(document.body, { childList: true, subtree: true });
 sendBg<boolean>({ type: "get_detection_enabled" })
   .then((enabled) => { detectionEnabled = enabled; })
   .catch(() => {});
+
+// Relay wallet state from hosted connect page (quickdraw-auth.pages.dev) to background.
+// The page uses window.postMessage since chrome.runtime isn't available there directly.
+window.addEventListener("message", (event) => {
+  if (event.origin !== "https://quickdraw-auth.pages.dev") return;
+  const msg = event.data as { source?: string; type?: string; wallet?: WalletState };
+  if (msg.source !== "quickdraw-connect" || msg.type !== "set_wallet" || !msg.wallet) return;
+  chrome.runtime.sendMessage({ type: "set_wallet", wallet: msg.wallet }).catch(() => {});
+});

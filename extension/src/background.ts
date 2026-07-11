@@ -323,7 +323,10 @@ chrome.runtime.onConnect.addListener((port) => {
 async function findUsableTab(): Promise<chrome.tabs.Tab | undefined> {
   const win = await chrome.windows.getLastFocused({ windowTypes: ["normal"] });
   const tabs = await chrome.tabs.query({ windowId: win.id });
-  const isUsable = (t: chrome.tabs.Tab): boolean => !!t.url?.match(/^https?:\/\//);
+  // Exclude our own hosted pages — Phantom doesn't inject into them
+  const isUsable = (t: chrome.tabs.Tab): boolean =>
+    !!t.url?.match(/^https?:\/\//) &&
+    !t.url.startsWith("https://quickdraw-auth.pages.dev");
   return tabs.find(t => t.active && isUsable(t)) ?? tabs.find(isUsable);
 }
 
@@ -443,7 +446,9 @@ async function handleMessage(msg: BgRequest, respond: (r: BgResponse) => void): 
     }
 
     if (msg.type === "connect_wallet_reown") {
-      const connectUrl = chrome.runtime.getURL("connect.html");
+      // Open the hosted connect page (https://) so injected wallets like Phantom are visible.
+      // The page posts wallet state back via window.postMessage; content.ts relays it to background.
+      const connectUrl = "https://quickdraw-auth.pages.dev/connect.html";
       try {
         await chrome.tabs.create({ url: connectUrl, active: true });
         respond({ ok: true, data: null });

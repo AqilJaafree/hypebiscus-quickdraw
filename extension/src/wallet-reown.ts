@@ -14,11 +14,19 @@ let modal: ReturnType<typeof createAppKit> | null = null;
 export function initReown(): ReturnType<typeof createAppKit> {
   if (modal) return modal;
 
-  const adapter = new SolanaAdapter();
+  // registerWalletStandard: true makes WalletConnect appear alongside Phantom/Solflare
+  // in Wallet Standard-compatible integrations (e.g. Phantom Mobile via WalletConnect QR)
+  const adapter = new SolanaAdapter({ registerWalletStandard: true });
   modal = createAppKit({
     adapters: [adapter],
     networks: [solana],
     projectId: PROJECT_ID,
+    metadata: {
+      name: "Quickdraw",
+      description: "Solana trading assistant",
+      url: "https://quickdraw-worker.wanaqilre.workers.dev",
+      icons: [],
+    },
     features: {
       email: true,
       socials: false,
