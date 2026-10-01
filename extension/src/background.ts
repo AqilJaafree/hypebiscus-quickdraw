@@ -5,10 +5,11 @@ import type {
   BgRequest, BgResponse, SafetyScore, TokenData, TokenPrice,
   WalletState, PriceAlert, WatchItem, WatchItemWithPrice, SkillSettings,
   DeepPortRequest, DeepPortMessage, AdapterQuote, MultiAdapterQuote,
-  PortfolioItem,
+  PortfolioItem, SwapResult, PendingSwap,
 } from "./types";
 import { DEFAULT_SKILL_SETTINGS } from "./types";
 import type { TweetContext } from "./tweet-context";
+import type { JevSignals } from "./jev-signals";
 
 declare const __WORKER_URL__: string;
 declare const __EXTENSION_SECRET__: string;
@@ -28,6 +29,10 @@ const safetyCache = new Map<string, CacheEntry<SafetyScore>>();
 const priceCache  = new Map<string, CacheEntry<TokenPrice | null>>();
 const dedupMap    = new Map<string, number>();
 
+const signalsCache = new Map<string, CacheEntry<JevSignals>>();
+
+const SIGNALS_TTL_MS = 600_000;
+const SIGNALS_CACHE_MAX = 200;
 const SAFETY_TTL_MS = 300_000;
 const PRICE_TTL_MS  =  15_000;
 const DEDUP_MS      =  30_000;
@@ -162,7 +167,7 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
         if (alertShouldFire(a, currentPrice)) {
           chrome.notifications.create(`qd-alert-${a.mint}-${a.condition}`, {
             type: "basic",
-            iconUrl: "icon.png",
+            iconUrl: "icons/icon128.png",
             title: "Quickdraw Alert",
             message: `${a.ticker} is ${a.condition === "ABOVE" ? "above" : "below"} $${a.price} (now $${currentPrice.toFixed(6)})`,
           });
@@ -193,6 +198,7 @@ chrome.runtime.onConnect.addListener((port) => {
       safety: { score: number; label: string; summary: string };
       price: { usd: number; symbol: string } | null;
       tweetContext?: TweetContext | null;
+      narrationHint?: string | null;
     };
     try {
       const system = "You are a concise DeFi analyst for Solana traders. Write 1-2 sentences about the token's risk and key facts. Be direct. No disclaimers.";
@@ -212,7 +218,7 @@ chrome.runtime.onConnect.addListener((port) => {
         `Safety score: ${req.safety.score}/100 (${req.safety.label})`,
         `Details: ${req.safety.summary}`,
         req.price ? `Price: $${req.price.usd.toFixed(6)} (${req.price.symbol})` : "Price: unavailable",
-      ].join("\n") + tweetContextStr;
+      ].join("\n") + tweetContextStr + (req.narrationHint ? `\n${req.narrationHint}` : "");
 
       const resp = await fetch(`${WORKER_URL}/ai/fast`, {
         method: "POST",
@@ -319,6 +325,17 @@ chrome.runtime.onConnect.addListener((port) => {
   });
 });
 
+// ── Tab helper ─────────────────────────────────────────────────────────────────
+async function findUsableTab(): Promise<chrome.tabs.Tab | undefined> {
+  const win = await chrome.windows.getLastFocused({ windowTypes: ["normal"] });
+  const tabs = await chrome.tabs.query({ windowId: win.id });
+  // Exclude our own hosted pages — Phantom doesn't inject into them
+  const isUsable = (t: chrome.tabs.Tab): boolean =>
+    !!t.url?.match(/^https?:\/\//) &&
+    !t.url.startsWith("https://quickdraw-auth.pages.dev");
+  return tabs.find(t => t.active && isUsable(t)) ?? tabs.find(isUsable);
+}
+
 // ── Message handler ────────────────────────────────────────────────────────────
 chrome.runtime.onMessage.addListener(
   (msg: BgRequest, _sender, sendResponse: (r: BgResponse) => void) => {
@@ -338,6 +355,39 @@ async function handleMessage(msg: BgRequest, respond: (r: BgResponse) => void): 
       dedupMap.set(msg.address, Date.now());
       const data = await getTokenData(msg.address);
       chrome.storage.local.set({ lastToken: msg.address }).catch(() => {});
+      respond({ ok: true, data });
+      return;
+    }
+
+    if (msg.type === "get_signals") {
+      const cacheKey = `${msg.address}:${msg.text}`;
+      const cached = signalsCache.get(cacheKey);
+      if (isFresh(cached)) { respond({ ok: true, data: cached.data }); return; }
+
+      const resp = await fetch(`${WORKER_URL}/ai/signals`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Quickdraw-Client": "extension",
+          "Authorization": `Bearer ${EXTENSION_SECRET}`,
+        },
+        body: JSON.stringify({
+          address: msg.address,
+          text: msg.text,
+          author: msg.author,
+          tokenName: msg.tokenName,
+          tokenSymbol: msg.tokenSymbol,
+          jupiterVerified: msg.jupiterVerified,
+        }),
+      });
+      if (!resp.ok) { respond({ ok: false, error: "Signals unavailable" }); return; }
+      const data = await resp.json() as JevSignals;
+
+      if (signalsCache.size >= SIGNALS_CACHE_MAX) {
+        const oldest = signalsCache.keys().next().value;
+        if (oldest !== undefined) signalsCache.delete(oldest);
+      }
+      signalsCache.set(cacheKey, { data, expiresAt: Date.now() + SIGNALS_TTL_MS });
       respond({ ok: true, data });
       return;
     }
@@ -411,12 +461,12 @@ async function handleMessage(msg: BgRequest, respond: (r: BgResponse) => void): 
         respond({ ok: false, error: "Price fetch failed" });
         return;
       }
-      const data = await resp.json() as { data: Record<string, { price: number }> };
+      const data = await resp.json() as { data: Record<string, { price: number; priceChange24h?: number | null }> };
       const result: WatchItemWithPrice[] = msg.mints.map(mint => ({
         mint,
         ticker: "",
         priceUsd: data.data[mint]?.price ?? null,
-        change24h: null,
+        change24h: data.data[mint]?.priceChange24h ?? null,
       }));
       respond({ ok: true, data: result });
       return;
@@ -434,15 +484,22 @@ async function handleMessage(msg: BgRequest, respond: (r: BgResponse) => void): 
       return;
     }
 
+    if (msg.type === "connect_wallet_reown") {
+      // Open the hosted connect page (https://) so injected wallets like Phantom are visible.
+      // The page posts wallet state back via window.postMessage; content.ts relays it to background.
+      const connectUrl = "https://quickdraw-auth.pages.dev/connect.html";
+      try {
+        await chrome.tabs.create({ url: connectUrl, active: true });
+        respond({ ok: true, data: null });
+      } catch (e) {
+        respond({ ok: false, error: String(e) });
+      }
+      return;
+    }
+
     if (msg.type === "connect_wallet_injected") {
       console.log("[QD bg] connect_wallet_injected received");
-      const win = await chrome.windows.getLastFocused({ windowTypes: ["normal"] });
-      const allTabs = await chrome.tabs.query({ windowId: win.id });
-      // Prefer the active tab if it's http/https; otherwise take the first usable tab.
-      // chrome:// and chrome-extension:// pages can't receive scripting injection.
-      const isUsable = (t: chrome.tabs.Tab) => !!t.url?.match(/^https?:\/\//);
-      const activeTab = allTabs.find(t => t.active && isUsable(t));
-      const tab = activeTab ?? allTabs.find(isUsable);
+      const tab = await findUsableTab();
       console.log("[QD bg] using tab id:", tab?.id, tab?.url);
       if (!tab?.id) {
         respond({ ok: false, error: "Open any webpage (http/https) then try again." });
@@ -579,6 +636,127 @@ async function handleMessage(msg: BgRequest, respond: (r: BgResponse) => void): 
       } catch { /* storage write failed — data still returned */ }
 
       respond({ ok: true, data });
+      return;
+    }
+
+    if (msg.type === "execute_swap") {
+      await walletReady;
+      if (!walletState.connected || !walletState.address) {
+        respond({ ok: false, error: "No wallet connected" });
+        return;
+      }
+      if (walletState.address !== msg.walletAddress) {
+        respond({ ok: false, error: "Wallet address mismatch" });
+        return;
+      }
+
+      // 1. Fetch the unsigned swap transaction from the worker
+      const swapResp = await fetch(`${WORKER_URL}/defi/jupiter/swap`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Quickdraw-Client": "extension",
+          "Authorization": `Bearer ${EXTENSION_SECRET}`,
+        },
+        body: JSON.stringify({
+          inputMint: msg.inputMint,
+          outputMint: msg.outputMint,
+          amount: msg.amountLamports,
+          slippageBps: 50,
+          userPublicKey: msg.walletAddress,
+        }),
+      });
+      if (!swapResp.ok) {
+        const errText = await swapResp.text().catch(() => "Swap build failed");
+        respond({ ok: false, error: errText });
+        return;
+      }
+      const { txBase64 } = await swapResp.json() as { txBase64: string };
+
+      // 2. Branch on wallet adapter — Reown uses a dedicated sign tab
+      const { wallet: storedWallet } = await chrome.storage.local.get("wallet") as
+        { wallet?: { adapter: string | null } };
+
+      if (storedWallet?.adapter === "reown") {
+        // Reown embedded wallet: sign via dedicated extension tab
+        const pending: PendingSwap = {
+          txBase64,
+          adapter: "jupiter",
+          expiresAt: Date.now() + 60_000,
+        };
+        await chrome.storage.session.remove("swapResult");
+        await chrome.storage.session.set({ pendingSwap: pending });
+
+        const signUrl = chrome.runtime.getURL("sign.html");
+        try {
+          await chrome.tabs.create({ url: signUrl, active: true });
+        } catch (e) {
+          respond({ ok: false, error: `Could not open sign tab: ${String(e)}` });
+          return;
+        }
+
+        // Poll chrome.storage.session for result (sign tab writes swapResult and closes)
+        const result = await new Promise<SwapResult>((resolve, reject) => {
+          const timeout = setTimeout(() => {
+            clearInterval(interval);
+            reject(new Error("Signing timed out (90s)"));
+          }, 90_000);
+          const interval = setInterval(async () => {
+            try {
+              const { swapResult } = await chrome.storage.session.get("swapResult") as
+                { swapResult?: { signature?: string; explorer?: string; error?: string } };
+              if (!swapResult) return;
+              clearInterval(interval);
+              clearTimeout(timeout);
+              await chrome.storage.session.remove("swapResult");
+              if (swapResult.error) reject(new Error(swapResult.error));
+              else if (!swapResult.signature || !swapResult.explorer) reject(new Error("Sign tab returned incomplete result"));
+              else resolve({ signature: swapResult.signature, explorer: swapResult.explorer });
+            } catch { /* storage read error — keep polling */ }
+          }, 500);
+        });
+
+        respond({ ok: true, data: result });
+        return;
+      }
+
+      // 3. Find a usable (http/https) tab in the last focused window (injected wallet path)
+      const tab = await findUsableTab();
+      if (!tab?.id) {
+        respond({ ok: false, error: "Open any webpage (http/https) then try again." });
+        return;
+      }
+
+      // 4. Define __QD_SIGN__ in the MAIN world (sync top-level assignment, safe with files:[])
+      await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        world: "MAIN",
+        files: ["dist/signer.js"],
+      });
+
+      // 5. Call __QD_SIGN__ — executeScript awaits a returned Promise from func
+      type SignResult = { ok: true; signature: string } | { ok: false; error: string };
+      const signerResults = await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        world: "MAIN",
+        func: (txBase64: string): Promise<SignResult> => {
+          type SignFn = (txBase64: string) => Promise<SignResult>;
+          return ((window as Record<string, unknown>).__QD_SIGN__ as SignFn)(txBase64);
+        },
+        args: [txBase64],
+      });
+
+      const signerResult = signerResults[0]?.result as SignResult | undefined;
+      if (!signerResult?.ok) {
+        respond({ ok: false, error: (signerResult as { ok: false; error: string } | undefined)?.error ?? "Signer returned no result" });
+        return;
+      }
+
+      const result: SwapResult = {
+        signature: signerResult.signature,
+        explorer: `https://solscan.io/tx/${signerResult.signature}`,
+      };
+      respond({ ok: true, data: result });
       return;
     }
 

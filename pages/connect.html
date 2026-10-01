@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Quickdraw — Connect Wallet</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: #0e0e0e;
+      color: #f5f0e8;
+      font-family: ui-monospace, 'Space Mono', monospace;
+      display: flex; align-items: center; justify-content: center;
+      min-height: 100vh;
+    }
+
+    .card {
+      background: #141414;
+      border: 1px solid #2a2a2a;
+      box-shadow: 0 0 0 1px #000, 4px 4px 0 #000;
+      width: 320px;
+    }
+
+    .hd {
+      display: flex; justify-content: space-between; align-items: center;
+      padding: 14px 16px; border-bottom: 1px solid #1e1e1e;
+    }
+    .hd-title { color: #f5e642; font-size: 11px; font-weight: 700; letter-spacing: 3px; }
+    .hd-close {
+      background: none; border: none; color: #333; font-size: 14px;
+      cursor: pointer; font-family: inherit; padding: 2px 4px; line-height: 1;
+    }
+    .hd-close:hover { color: #666; }
+
+    .body { padding: 20px 16px; display: flex; flex-direction: column; gap: 12px; }
+
+    .sub {
+      font-size: 10px; color: #444; letter-spacing: 0.04em; line-height: 1.6;
+    }
+
+    /* Confirm section */
+    #sect-confirm { display: none; flex-direction: column; gap: 8px; }
+    .addr-row {
+      display: flex; align-items: center; gap: 8px;
+      padding: 10px 12px; background: #0f1a0f; border: 1px solid #1a2e1a;
+    }
+    .addr-dot { width: 6px; height: 6px; border-radius: 50%; background: #8bf542; flex-shrink: 0; }
+    .addr-val { font-size: 12px; color: #8bf542; font-weight: 700; letter-spacing: 0.05em; }
+
+    .btn-confirm {
+      padding: 10px 12px; background: #f5e642; color: #111;
+      border: 2px solid #c8bb35; font-family: inherit; font-size: 11px;
+      font-weight: 700; cursor: pointer; letter-spacing: 0.05em;
+    }
+    .btn-confirm:hover { background: #f9ed5a; }
+
+    .btn-switch {
+      padding: 7px 10px; background: none; color: #444;
+      border: 1px solid #1e1e1e; font-family: inherit; font-size: 10px;
+      cursor: pointer; text-align: center;
+    }
+    .btn-switch:hover { color: #888; border-color: #333; }
+
+    /* Retry button (shown if modal closed without connecting) */
+    #btn-retry {
+      display: none; padding: 10px 12px; background: #1e1e1e; color: #f5f0e8;
+      border: 1px solid #2a2a2a; font-family: inherit; font-size: 11px;
+      font-weight: 700; cursor: pointer; letter-spacing: 0.05em;
+    }
+    #btn-retry:hover { border-color: #f5e642; }
+
+    .foot {
+      padding: 10px 16px; border-top: 1px solid #1a1a1a; min-height: 32px;
+    }
+    #status { font-size: 10px; color: #444; }
+    #error  { font-size: 10px; color: #f54242; }
+  </style>
+</head>
+<body>
+  <div class="card">
+
+    <div class="hd">
+      <span class="hd-title">QUICKDRAW</span>
+      <button class="hd-close" onclick="window.close()">✕</button>
+    </div>
+
+    <div class="body">
+
+      <div class="sub">
+        Connect via email, WalletConnect, or any Solana wallet.
+      </div>
+
+      <!-- Confirm section (shown after wallet connects) -->
+      <div id="sect-confirm">
+        <div class="addr-row">
+          <span class="addr-dot"></span>
+          <span class="addr-val" id="addr-val"></span>
+        </div>
+        <button class="btn-confirm" id="btn-confirm">Use this wallet ↗</button>
+        <button class="btn-switch"  id="btn-switch">Use different wallet</button>
+      </div>
+
+      <!-- Retry button (shown if modal closed without connecting) -->
+      <button id="btn-retry">Connect Wallet →</button>
+
+    </div>
+
+    <div class="foot">
+      <div id="status">Opening wallet picker…</div>
+      <div id="error"></div>
+    </div>
+
+  </div>
+  <script type="module" src="./connect.js"></script>
+</body>
+</html>

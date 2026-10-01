@@ -1,5 +1,8 @@
-import type { SafetyScore, TokenPrice, WalletState } from "./types";
+import type { SafetyScore, TokenPrice, WalletState, PortfolioItem } from "./types";
 import { DS, safetyColor } from "./styles";
+import { sendBg } from "./shared";
+import { buildTradePanel } from "./skills/trade";
+import type { SignalFlag } from "./jev-signals";
 
 const HOST_ID = "quickdraw-host";
 
@@ -117,6 +120,19 @@ export class PopupController {
     }
   }
 
+  showSignals(flags: SignalFlag[]): void {
+    const el = this.shadow.getElementById("qd-signals");
+    if (!el || !flags.length) return;
+    el.textContent = "";
+    for (const f of flags) {
+      const chip = document.createElement("span");
+      chip.className = `qd-chip qd-chip-${f.severity}`;
+      chip.textContent = f.label;
+      el.appendChild(chip);
+    }
+    el.style.display = "flex";
+  }
+
   appendNarration(delta: string): void {
     const el = this.shadow.getElementById("qd-narration");
     if (!el) return;
@@ -130,6 +146,31 @@ export class PopupController {
   }
 
   updateWallet(_wallet: WalletState): void {}
+
+  async showTradePanel(outputMint: string, ticker: string, wallet: WalletState): Promise<void> {
+    // Look up held balance for this token
+    let heldBalance = 0;
+    if (wallet.connected) {
+      try {
+        const portfolio = await sendBg<PortfolioItem[]>({ type: "get_portfolio" });
+        const item = portfolio.find(p => p.mint === outputMint);
+        if (item) heldBalance = item.balance;
+      } catch { /* portfolio unavailable — sell tab hidden */ }
+    }
+
+    const tradeEl = buildTradePanel(outputMint, ticker, wallet, heldBalance);
+
+    // Replace the actions bar with the trade panel inside the shadow root
+    const actionsEl = this.shadow.getElementById("qd-actions-wrap");
+    if (actionsEl) {
+      actionsEl.innerHTML = "";
+      actionsEl.appendChild(tradeEl);
+    } else {
+      // Fallback: append to popup container
+      const popup = this.shadow.querySelector(".popup");
+      if (popup) popup.appendChild(tradeEl);
+    }
+  }
 }
 
 function buildShell(address: string): string {
@@ -157,6 +198,11 @@ function buildShell(address: string): string {
   .qd-price-row { padding: 8px 12px 4px; display: flex; align-items: center; gap: 10px; }
   #qd-price { font-size: 13px; color: #fff; font-weight: 700; }
   #qd-change { font-size: 12px; font-weight: 700; }
+  #qd-signals { display: none; flex-wrap: wrap; gap: 4px; padding: 2px 12px 6px; }
+  .qd-chip { font-size: 9px; font-weight: 700; letter-spacing: 0.06em; padding: 2px 5px; border: 1px solid; }
+  .qd-chip-risk { color: ${DS.danger}; border-color: ${DS.danger}; }
+  .qd-chip-caution { color: ${DS.caution}; border-color: ${DS.caution}; }
+  .qd-chip-info { color: #888; border-color: #444; }
   #qd-narration { display: none; padding: 6px 12px 8px; font-size: 10px; color: #666;
     line-height: 1.5; font-style: italic; border-top: 1px solid #1e1e1e; }
   .qd-sep { height: 1px; background: #1e1e1e; }
@@ -187,12 +233,15 @@ function buildShell(address: string): string {
     <span id="qd-price"></span>
     <span id="qd-change"></span>
   </div>
+  <div id="qd-signals"></div>
   <div id="qd-narration"></div>
   <div class="qd-sep"></div>
-  <div class="qd-actions">
-    <button id="qd-buy">BUY</button>
-    <div class="qd-act-div"></div>
-    <button id="qd-cancel">CANCEL</button>
+  <div id="qd-actions-wrap">
+    <div class="qd-actions">
+      <button id="qd-buy">BUY</button>
+      <div class="qd-act-div"></div>
+      <button id="qd-cancel">CANCEL</button>
+    </div>
   </div>
 </div>`;
 }

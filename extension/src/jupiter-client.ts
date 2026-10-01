@@ -2,8 +2,9 @@ import { computeSafetyScore } from "./score";
 import type { SafetyScore, TokenPrice, SwapQuote } from "./types";
 
 const JUPITER_SEARCH = "https://lite-api.jup.ag/tokens/v2/search";
-const JUPITER_QUOTE  = "https://quote-api.jup.ag/v6/quote";
-const JUPITER_SWAP   = "https://quote-api.jup.ag/v6/swap";
+// quote-api.jup.ag/v6 is retired; swap/v1 keeps the same quote/swap shapes.
+const JUPITER_QUOTE  = "https://lite-api.jup.ag/swap/v1/quote";
+const JUPITER_SWAP   = "https://lite-api.jup.ag/swap/v1/swap";
 
 interface SearchResult {
   id: string;

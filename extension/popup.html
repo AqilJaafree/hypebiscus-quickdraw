@@ -60,15 +60,38 @@
       background: #282828; color: #666; }
     .ai-btn.active { background: #f5e642; color: #111; font-weight: 700;
       border-color: #333; }
+    .ai-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    /* ── Skills list ────────────────────────────────────────────────────────── */
+    .skill-row { display: flex; justify-content: space-between; align-items: center; }
+    .skill-row.disabled { opacity: 0.45; }
+    .skill-left { display: flex; align-items: center; gap: 8px; }
+    .skill-name { font-size: 12px; font-weight: 700; color: #fff; }
+    .skill-tag { font-size: 8px; font-weight: 700; letter-spacing: 1px; color: #f5e642;
+      border: 1px solid #f5e642; padding: 1px 4px; text-transform: uppercase; line-height: 1.4; }
+
+    .qd-switch { position: relative; width: 34px; height: 18px; flex-shrink: 0; padding: 0;
+      border: none; background: #444; border-radius: 9px; cursor: pointer; }
+    .qd-switch::after { content: ""; position: absolute; top: 2px; left: 2px; width: 14px;
+      height: 14px; border-radius: 50%; background: #888; }
+    .qd-switch.on { background: #8bf542; }
+    .qd-switch.on::after { left: 18px; background: #111; }
+    .qd-switch:disabled { cursor: not-allowed; }
+
+    .browse-btn { width: 100%; padding: 10px; background: none; border: 1px dashed #444;
+      color: #555; font-family: inherit; font-size: 10px; font-style: italic;
+      cursor: not-allowed; text-align: center; }
 
     /* ── Connect button ─────────────────────────────────────────────────────── */
     #connect-btn { width: 100%; padding: 7px; background: #f5e642; color: #111;
       font-size: 11px; font-weight: 700; font-family: inherit; cursor: pointer;
       border: 2px solid #333; box-shadow: 2px 2px 0 #333;
-      letter-spacing: 0.04em; }
+      letter-spacing: 0.04em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     #connect-btn:hover { filter: brightness(1.05); }
     #connect-btn.connected { background: #1a1a1a; color: #8bf542;
-      border-color: #333; box-shadow: none; }
+      border-color: #2a2a2a; box-shadow: none; }
+    #connect-btn.connected:hover { background: #200; color: #f54242; border-color: #500; }
+    #connect-btn.connected:hover::after { content: " — disconnect"; font-weight: 400; }
 
     .portfolio-row { display:flex; justify-content:space-between; align-items:center; padding:1px 4px; }
     .portfolio-sym { font-size:10px; color:#888; }
@@ -123,8 +146,8 @@
         <div class="section-label">AI MODE</div>
         <div class="ai-toggle">
           <button class="ai-btn active" id="ai-auto">Auto</button>
-          <button class="ai-btn" id="ai-cloud">Cloud</button>
-          <button class="ai-btn" id="ai-local">Local</button>
+          <button class="ai-btn" id="ai-cloud" disabled>Cloud</button>
+          <button class="ai-btn" id="ai-local" disabled>Local</button>
         </div>
       </div>
 
@@ -148,28 +171,39 @@
   <div class="qd-pane" id="pane-skills">
     <div class="content">
 
-      <div class="section">
-        <div class="section-label">AI NARRATION</div>
-        <div class="stat-row">
-          <span class="stat-key">Stream analysis on detect</span>
-          <span class="stat-val" id="ai-narration-status">ON</span>
+      <div class="skill-row">
+        <div class="skill-left">
+          <span class="skill-name">Jupiter Swap</span>
+          <span class="skill-tag">DEX</span>
         </div>
+        <button class="qd-switch on" id="toggle-jupiter" aria-label="Toggle Jupiter Swap"></button>
       </div>
 
-      <div class="sep"></div>
-
-      <div class="section">
-        <div class="section-label">SITE DETECTION</div>
-        <div style="font-size:9px;color:#555;margin-bottom:6px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" id="site-hostname">—</div>
-        <div class="ai-toggle" id="site-mode-toggle">
-          <button class="ai-btn" id="site-aggressive">All</button>
-          <button class="ai-btn" id="site-selection">Select</button>
-          <button class="ai-btn" id="site-off">Off</button>
+      <div class="skill-row disabled">
+        <div class="skill-left">
+          <span class="skill-name">Drift Protocol</span>
+          <span class="skill-tag">PERPS</span>
         </div>
-        <div style="font-size:9px;color:#333;margin-top:4px;line-height:1.5;">
-          All: every address · Select: highlight only · Off: disabled
-        </div>
+        <button class="qd-switch" disabled aria-label="Drift Protocol (coming soon)"></button>
       </div>
+
+      <div class="skill-row disabled">
+        <div class="skill-left">
+          <span class="skill-name">MarginFi Lend</span>
+          <span class="skill-tag">LENDING</span>
+        </div>
+        <button class="qd-switch" disabled aria-label="MarginFi Lend (coming soon)"></button>
+      </div>
+
+      <div class="skill-row disabled">
+        <div class="skill-left">
+          <span class="skill-name">Kamino Earn</span>
+          <span class="skill-tag">YIELD</span>
+        </div>
+        <button class="qd-switch" disabled aria-label="Kamino Earn (coming soon)"></button>
+      </div>
+
+      <button class="browse-btn" disabled>+ Browse plugins</button>
 
     </div>
   </div>

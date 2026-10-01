@@ -1,6 +1,12 @@
 .claude/
 .claude-plugin/
 
+# Dependencies
+node_modules/
+
+# Build output
+pages/connect.js
+
 # Local secrets — never commit
 .env
 .dev.vars
