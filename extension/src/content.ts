@@ -126,7 +126,7 @@ async function triggerAddress(address: string, rawX: number, rawY: number, sourc
       safety: { score: tokenData.safety.score, label: tokenData.safety.label, summary: tokenData.safety.summary },
       price: tokenData.price ? { usd: tokenData.price.usd, symbol: tokenData.price.symbol } : null,
       tweetContext: tweetContext ?? null,
-      narrationHint: verdict?.narrationHint ?? null,
+      signalFlags: verdict?.flags.map(f => f.label) ?? [],
     });
   } catch { /* worker not running — no narration */ }
 }

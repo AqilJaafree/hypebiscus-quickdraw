@@ -1,6 +1,7 @@
 // Policy over Jev (TypeSafe) context signals. The worker returns raw
 // probabilities; every threshold and decision lives here so it can be tuned
-// and tested without re-running inference.
+// and tested without re-running inference. Flag labels double as an
+// allowlist in worker/src/narration.ts — keep the two in sync.
 
 export interface JevSignals {
   model: string;
@@ -19,8 +20,6 @@ export interface SignalVerdict {
   flags: SignalFlag[];
   /** Skip the passive (scroll-detected) popup — the address isn't a token being discussed. */
   suppressPassive: boolean;
-  /** One line for the narration prompt, or null when there is nothing to add. */
-  narrationHint: string | null;
 }
 
 export const JEV_THRESHOLDS = {
@@ -60,9 +59,5 @@ export function deriveVerdict(s: JevSignals): SignalVerdict {
     (s.role.choice === "wallet" || s.role.choice === "unclear") &&
     s.role.confidence >= T.SUPPRESS_ROLE_CONFIDENCE;
 
-  const narrationHint = flags.length
-    ? `Context classifier flags: ${flags.map(f => f.label.toLowerCase()).join(", ")}.`
-    : null;
-
-  return { flags, suppressPassive, narrationHint };
+  return { flags, suppressPassive };
 }

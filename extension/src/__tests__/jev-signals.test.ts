@@ -18,7 +18,6 @@ describe("deriveVerdict()", () => {
     const v = deriveVerdict(signals());
     expect(v.flags).toEqual([]);
     expect(v.suppressPassive).toBe(false);
-    expect(v.narrationHint).toBeNull();
   });
 
   it("flags phishing from the noul", () => {
@@ -60,8 +59,8 @@ describe("deriveVerdict()", () => {
     expect(v.suppressPassive).toBe(false);
   });
 
-  it("builds a narration hint from flags", () => {
+  it("orders risk flags before caution flags", () => {
     const v = deriveVerdict(signals({ phishing: 0.9, shill: { score: 2.2, confidence: 0.9 } }));
-    expect(v.narrationHint).toBe("Context classifier flags: phishing pattern, heavy shill.");
+    expect(v.flags.map(f => f.label)).toEqual(["PHISHING PATTERN", "HEAVY SHILL"]);
   });
 });
