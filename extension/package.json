@@ -1,6 +1,6 @@
 {
   "name": "quickdraw-extension",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "scripts": {
     "build": "esbuild src/content.ts src/background.ts src/connect.ts src/signer.ts src/sign.ts --bundle --outdir=dist --target=chrome111 --format=esm --define:__WORKER_URL__='\"http://localhost:8787\"' --define:__EXTENSION_SECRET__='\"dev-extension-secret-change-in-prod\"' \"--define:__REOWN_PROJECT_ID__=\\\"${REOWN_PROJECT_ID:-dev-reown-project-id}\\\"\" && esbuild src/popup.ts --bundle --outdir=dist --splitting --target=chrome111 --format=esm",
