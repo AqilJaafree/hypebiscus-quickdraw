@@ -93,9 +93,8 @@ function init(): void {
   const lastSeenEl    = document.getElementById("last-seen") as HTMLElement;
   const sessionTimeEl = document.getElementById("session-time") as HTMLElement;
 
-  // ── Skills + AI mode ───────────────────────────────────────────────────────
-  // AI mode is locked to Auto (Cloud/Local are disabled in the popup). The
-  // Jupiter Swap skill maps to SkillSettings.trade; the other skills are
+  // ── Skills ─────────────────────────────────────────────────────────────────
+  // The Jupiter Swap skill maps to SkillSettings.trade; the other skills are
   // placeholders (disabled switches, no handlers).
   const jupiterToggle = document.getElementById("toggle-jupiter") as HTMLButtonElement;
 
@@ -111,10 +110,6 @@ function init(): void {
   sendBg<SkillSettings>({ type: "get_skill_settings" })
     .then(settings => {
       jupiterToggle.classList.toggle("on", settings.trade !== false);
-      // Keep stored AI mode consistent with the locked Auto UI.
-      if (settings.aiMode !== "auto") {
-        sendBg({ type: "set_skill_settings", settings: { ...settings, aiMode: "auto" } }).catch(() => {});
-      }
     })
     .catch(() => {});
 
