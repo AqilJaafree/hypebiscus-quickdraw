@@ -23,3 +23,11 @@ id = "431e107bbb604d89a778c8009e559dac"
 name = "RATE_LIMITER"
 namespace_id = "1001"
 simple = { limit = 120, period = 60 }
+
+# Run in a US data center. Workers otherwise run (and make outbound fetches)
+# from the location nearest the user; from some Asian locations, e.g. Hong
+# Kong, api.anthropic.com answers 403 "Request not allowed". Pinning near
+# us-east-1 keeps Anthropic reachable, at the cost of extra latency for users
+# far from the US.
+[placement]
+region = "aws:us-east-1"
