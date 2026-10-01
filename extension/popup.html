@@ -53,15 +53,6 @@
     .stat-key { font-size: 10px; color: #666; }
     .stat-val { font-size: 11px; font-weight: 700; color: #fff; }
 
-    /* ── AI toggle ──────────────────────────────────────────────────────────── */
-    .ai-toggle { display: flex; gap: 2px; }
-    .ai-btn { flex: 1; padding: 6px 4px; font-size: 10px; font-weight: normal;
-      font-family: inherit; cursor: pointer; border: 1px solid #444;
-      background: #282828; color: #666; }
-    .ai-btn.active { background: #f5e642; color: #111; font-weight: 700;
-      border-color: #333; }
-    .ai-btn:disabled { opacity: 0.4; cursor: not-allowed; }
-
     /* ── Skills list ────────────────────────────────────────────────────────── */
     .skill-row { display: flex; justify-content: space-between; align-items: center; }
     .skill-row.disabled { opacity: 0.45; }
@@ -139,15 +130,6 @@
         <div class="stat-row">
           <span class="stat-key">Session</span>
           <span class="stat-val" id="session-time">—</span>
-        </div>
-      </div>
-
-      <div class="section">
-        <div class="section-label">AI MODE</div>
-        <div class="ai-toggle">
-          <button class="ai-btn active" id="ai-auto">Auto</button>
-          <button class="ai-btn" id="ai-cloud" disabled>Cloud</button>
-          <button class="ai-btn" id="ai-local" disabled>Local</button>
         </div>
       </div>
 

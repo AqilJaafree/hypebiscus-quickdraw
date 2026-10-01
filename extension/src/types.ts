@@ -85,7 +85,6 @@ export interface SkillSettings {
   alert: boolean;
   watch: boolean;
   deep: boolean;
-  aiMode?: "auto" | "cloud" | "local";
 }
 
 export const DEFAULT_SKILL_SETTINGS: SkillSettings = {
@@ -93,7 +92,6 @@ export const DEFAULT_SKILL_SETTINGS: SkillSettings = {
   alert: true,
   watch: true,
   deep: true,
-  aiMode: "auto",
 };
 
 export interface DeepPortRequest {
