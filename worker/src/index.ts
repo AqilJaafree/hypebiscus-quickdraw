@@ -14,9 +14,9 @@
  *   GET  /market/pulse               → SOL price + Fear & Greed (cached 5min)
  *   GET  /transcribe-token           → AssemblyAI temporary JWT
  *   GET  /defi/jupiter-strict        → Jupiter strict token list lookup
- *   GET  /defi/jupiter/quote         → Jupiter v6 /quote proxy
- *   POST /defi/jupiter/swap          → Jupiter v6 /swap proxy
- *   GET  /defi/jupiter/price         → Jupiter price API
+ *   GET  /defi/jupiter/quote         → Jupiter swap/v1 /quote proxy
+ *   POST /defi/jupiter/swap          → Jupiter swap/v1 /swap (builds the quote when given mints)
+ *   GET  /defi/jupiter/price         → Jupiter price/v3, returned in the v2 `{ data }` shape
  *   GET  /defi/safety/rugcheck       → RugCheck report proxy
  *   GET  /defi/helius/token          → Helius DAS token metadata
  *   GET  /defi/helius/portfolio      → Helius DAS fungible token holdings
@@ -33,19 +33,23 @@ export interface Env {
   ASSEMBLYAI_API_KEY: string;
   REOWN_PROJECT_ID: string;
   OPENROUTER_API_KEY?: string;
-  RATE_LIMIT_KV: KVNamespace;
+  RATE_LIMIT_KV: KVNamespace;   // market-pulse cache only
+  RATE_LIMITER: RateLimit;      // Workers Rate Limiting binding (wrangler.toml [[ratelimits]])
 }
 
 // ─────────────────────────── Constants ───────────────────────────────────────
 
 const ALLOWED_CLOCK_SKEW_SECS = 30;
-const RATE_LIMIT_WINDOW_SECS  = 60;
-const RATE_LIMIT_MAX_REQS     = 120; // per window per client IP
 
 const ANTHROPIC_BASE = "https://api.anthropic.com/v1";
-const JUPITER_QUOTE  = "https://quote-api.jup.ag/v6";
-const JUPITER_PRICE  = "https://api.jup.ag/price/v2";
-const JUPITER_TOKEN  = "https://token.jup.ag";
+// quote-api.jup.ag/v6, api.jup.ag/price/v2 and token.jup.ag are retired.
+const JUPITER_SWAP_API = "https://lite-api.jup.ag/swap/v1";
+const JUPITER_PRICE    = "https://lite-api.jup.ag/price/v3";
+const JUPITER_SEARCH   = "https://lite-api.jup.ag/tokens/v2/search";
+const SOL_MINT         = "So11111111111111111111111111111111111111112";
+const BASE58_ADDR      = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
+const MAX_SLIPPAGE_BPS = 500;
+const MAX_PRICE_IDS    = 50;
 const RUGCHECK_BASE  = "https://api.rugcheck.xyz/v1";
 const FEARGREED_URL  = "https://api.alternative.me/fng/?limit=1";
 
@@ -84,12 +88,12 @@ async function verifyHmac(req: Request, secret: string): Promise<boolean> {
 
 // ─────────────────────────── Rate limiting ────────────────────────────────────
 
-async function checkRateLimit(ip: string, kv: KVNamespace): Promise<boolean> {
-  const key   = `rl:${ip}`;
-  const count = parseInt((await kv.get(key)) ?? "0", 10);
-  if (count >= RATE_LIMIT_MAX_REQS) return false;
-  await kv.put(key, String(count + 1), { expirationTtl: RATE_LIMIT_WINDOW_SECS });
-  return true;
+// Workers Rate Limiting binding: 120 req / 60 s per IP (see wrangler.toml).
+// Replaces a KV counter that wrote on every request and hit the free-tier
+// KV write limit (~1,000/day).
+async function checkRateLimit(ip: string, limiter: RateLimit): Promise<boolean> {
+  const { success } = await limiter.limit({ key: ip });
+  return success;
 }
 
 // ─────────────────────────── Response helpers ─────────────────────────────────
@@ -148,15 +152,14 @@ async function handleMarketPulse(env: Env): Promise<Response> {
   const cached = await env.RATE_LIMIT_KV.get(cacheKey);
   if (cached) return new Response(cached, { headers: { ...cors, "Content-Type": "application/json" } });
 
-  const [solResp, fngResp] = await Promise.all([
-    fetch(`${JUPITER_PRICE}?ids=So11111111111111111111111111111111111111112`),
+  const [prices, fngResp] = await Promise.all([
+    fetchPrices([SOL_MINT]).catch(() => ({} as Record<string, V3Price>)),
     fetch(FEARGREED_URL),
   ]);
 
-  const solData = await solResp.json<{ data: Record<string, { price: number }> }>();
   const fngData = await fngResp.json<{ data: Array<{ value: string; value_classification: string }> }>();
 
-  const solPrice    = solData?.data?.["So11111111111111111111111111111111111111112"]?.price ?? 0;
+  const solPrice    = prices[SOL_MINT]?.usdPrice ?? 0;
   const fngScore    = parseInt(fngData?.data?.[0]?.value ?? "50", 10);
   const fngLabel    = fngData?.data?.[0]?.value_classification ?? "Neutral";
 
@@ -189,39 +192,125 @@ async function handleJupiterStrictCheck(url: URL): Promise<Response> {
   const mint = url.searchParams.get("mint");
   if (!mint) return err("mint param required");
 
-  // Cache individual token lookups for 10 minutes
-  const resp = await fetch(`${JUPITER_TOKEN}/strict`);
-  if (!resp.ok) return err("Jupiter token list unavailable", 502);
+  // The strict list was retired; "verified" in Tokens v2 is its replacement.
+  const resp = await fetch(`${JUPITER_SEARCH}?query=${encodeURIComponent(mint)}`);
+  if (!resp.ok) return err("Jupiter token search unavailable", 502);
 
-  const tokens = await resp.json<Array<{ address: string }>>().catch(() => []);
-  const listed = tokens.some((t) => t.address === mint);
+  const tokens = await resp.json<Array<{ id: string; isVerified?: boolean }>>().catch(() => []);
+  const listed = tokens.some((t) => t.id === mint && t.isVerified === true);
   return json({ listed });
 }
 
 async function handleJupiterQuote(url: URL): Promise<Response> {
   const params = url.searchParams.toString();
-  const upstream = await fetch(`${JUPITER_QUOTE}/quote?${params}`);
+  const upstream = await fetch(`${JUPITER_SWAP_API}/quote?${params}`);
   const data = await upstream.json();
   return json(data, upstream.status);
 }
 
+interface SwapFromMints {
+  inputMint: string;
+  outputMint: string;
+  amount: number;
+  slippageBps: number;
+  userPublicKey: string;
+}
+
+function parseSwapFromMints(body: Record<string, unknown>): SwapFromMints | string {
+  const { inputMint, outputMint, userPublicKey } = body;
+  for (const [k, v] of Object.entries({ inputMint, outputMint, userPublicKey })) {
+    if (typeof v !== "string" || !BASE58_ADDR.test(v)) return `${k} must be a base58 address`;
+  }
+  const amount = Number(body.amount);
+  if (!Number.isSafeInteger(amount) || amount <= 0) return "amount must be a positive integer (base units)";
+  const slippageBps = body.slippageBps === undefined ? 50 : Number(body.slippageBps);
+  if (!Number.isInteger(slippageBps) || slippageBps < 1 || slippageBps > MAX_SLIPPAGE_BPS) {
+    return `slippageBps must be 1-${MAX_SLIPPAGE_BPS}`;
+  }
+  return {
+    inputMint: inputMint as string,
+    outputMint: outputMint as string,
+    amount,
+    slippageBps,
+    userPublicKey: userPublicKey as string,
+  };
+}
+
+// Two request shapes:
+//  - { quoteResponse, userPublicKey, ... }   → passed through to Jupiter as-is
+//  - { inputMint, outputMint, amount, slippageBps, userPublicKey }
+//      (extension) → quote + swap here, returns { txBase64, lastValidBlockHeight }
 async function handleJupiterSwap(req: Request): Promise<Response> {
-  const body = await req.text();
-  const upstream = await fetch(`${JUPITER_QUOTE}/swap`, {
+  const body = await req.json<Record<string, unknown>>().catch(() => null);
+  if (!body) return err("Invalid JSON body");
+
+  if (body.quoteResponse) {
+    const upstream = await fetch(`${JUPITER_SWAP_API}/swap`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    return json(await upstream.json(), upstream.status);
+  }
+
+  const parsed = parseSwapFromMints(body);
+  if (typeof parsed === "string") return err(parsed);
+
+  const params = new URLSearchParams({
+    inputMint: parsed.inputMint,
+    outputMint: parsed.outputMint,
+    amount: String(parsed.amount),
+    slippageBps: String(parsed.slippageBps),
+  });
+  const quoteResp = await fetch(`${JUPITER_SWAP_API}/quote?${params}`);
+  const quote = await quoteResp.json<Record<string, unknown>>();
+  if (!quoteResp.ok || quote.error) {
+    return err(`Quote failed: ${String(quote.error ?? quoteResp.status)}`, 502);
+  }
+
+  const swapResp = await fetch(`${JUPITER_SWAP_API}/swap`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body,
+    body: JSON.stringify({
+      quoteResponse: quote,
+      userPublicKey: parsed.userPublicKey,
+      dynamicComputeUnitLimit: true,
+    }),
   });
-  const data = await upstream.json();
-  return json(data, upstream.status);
+  const swap = await swapResp.json<{ swapTransaction?: string; lastValidBlockHeight?: number; error?: string }>();
+  if (!swapResp.ok || !swap.swapTransaction) {
+    return err(`Swap build failed: ${swap.error ?? swapResp.status}`, 502);
+  }
+  return json({ txBase64: swap.swapTransaction, lastValidBlockHeight: swap.lastValidBlockHeight ?? null });
 }
 
+interface V3Price { usdPrice: number; priceChange24h?: number }
+
+async function fetchPrices(ids: string[]): Promise<Record<string, V3Price>> {
+  const upstream = await fetch(`${JUPITER_PRICE}?ids=${ids.join(",")}`);
+  if (!upstream.ok) throw new Error(`Jupiter price ${upstream.status}`);
+  return upstream.json<Record<string, V3Price>>();
+}
+
+// Price v3 returns `{ [mint]: { usdPrice, priceChange24h } }`; callers (extension
+// alerts/watchlist, Rust app) read the old v2 `{ data: { [mint]: { price } } }`.
 async function handleJupiterPrice(url: URL): Promise<Response> {
-  const ids = url.searchParams.get("ids");
-  if (!ids) return err("ids param required");
-  const upstream = await fetch(`${JUPITER_PRICE}?ids=${ids}`);
-  const data = await upstream.json();
-  return json(data, upstream.status);
+  const ids = (url.searchParams.get("ids") ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+  if (!ids.length) return err("ids param required");
+  if (ids.length > MAX_PRICE_IDS) return err(`at most ${MAX_PRICE_IDS} ids`);
+  if (!ids.every((id) => BASE58_ADDR.test(id))) return err("ids must be base58 mints");
+
+  let prices: Record<string, V3Price>;
+  try {
+    prices = await fetchPrices(ids);
+  } catch (e) {
+    return err(e instanceof Error ? e.message : "Price fetch failed", 502);
+  }
+  const data: Record<string, { id: string; price: number; priceChange24h: number | null }> = {};
+  for (const [id, p] of Object.entries(prices)) {
+    data[id] = { id, price: p.usdPrice, priceChange24h: p.priceChange24h ?? null };
+  }
+  return json({ data });
 }
 
 async function handleRugcheck(url: URL): Promise<Response> {
@@ -511,7 +600,7 @@ export default {
         return err("Unauthorized", 401);
       }
       const ip = req.headers.get("CF-Connecting-IP") ?? "unknown";
-      if (!(await checkRateLimit(ip, env.RATE_LIMIT_KV))) {
+      if (!(await checkRateLimit(ip, env.RATE_LIMITER))) {
         return err("Too many requests", 429);
       }
       if (url.pathname === "/ai/fast" && req.method === "POST") {
@@ -525,6 +614,9 @@ export default {
       }
       if (url.pathname === "/defi/jupiter/quote") {
         return handleJupiterQuote(url);
+      }
+      if (url.pathname === "/defi/jupiter/price") {
+        return handleJupiterPrice(url);
       }
       if (url.pathname === "/defi/helius/portfolio") {
         return handleHeliusPortfolio(url, env);
@@ -542,7 +634,7 @@ export default {
 
     // Rate limit by IP
     const ip = req.headers.get("CF-Connecting-IP") ?? "unknown";
-    if (!(await checkRateLimit(ip, env.RATE_LIMIT_KV))) {
+    if (!(await checkRateLimit(ip, env.RATE_LIMITER))) {
       return err("Too many requests", 429);
     }
 

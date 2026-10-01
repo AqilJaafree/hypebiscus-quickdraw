@@ -167,7 +167,7 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
         if (alertShouldFire(a, currentPrice)) {
           chrome.notifications.create(`qd-alert-${a.mint}-${a.condition}`, {
             type: "basic",
-            iconUrl: "icon.png",
+            iconUrl: "icons/icon128.png",
             title: "Quickdraw Alert",
             message: `${a.ticker} is ${a.condition === "ABOVE" ? "above" : "below"} $${a.price} (now $${currentPrice.toFixed(6)})`,
           });
@@ -461,12 +461,12 @@ async function handleMessage(msg: BgRequest, respond: (r: BgResponse) => void): 
         respond({ ok: false, error: "Price fetch failed" });
         return;
       }
-      const data = await resp.json() as { data: Record<string, { price: number }> };
+      const data = await resp.json() as { data: Record<string, { price: number; priceChange24h?: number | null }> };
       const result: WatchItemWithPrice[] = msg.mints.map(mint => ({
         mint,
         ticker: "",
         priceUsd: data.data[mint]?.price ?? null,
-        change24h: null,
+        change24h: data.data[mint]?.priceChange24h ?? null,
       }));
       respond({ ok: true, data: result });
       return;

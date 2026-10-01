@@ -14,4 +14,12 @@ compatibility_flags = ["nodejs_compat"]
 [[kv_namespaces]]
 binding = "RATE_LIMIT_KV"
 id = "431e107bbb604d89a778c8009e559dac"
-preview_id = "431e107bbb604d89a778c8009e559dac"
+# preview_id intentionally omitted: it used to equal the production id, so
+# `wrangler dev --remote` shared production data.
+
+# Per-IP request limit (Workers Rate Limiting). Replaces the KV counter, which
+# wrote on every request. period must be 10 or 60 seconds.
+[[ratelimits]]
+name = "RATE_LIMITER"
+namespace_id = "1001"
+simple = { limit = 120, period = 60 }
