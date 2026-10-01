@@ -20,7 +20,10 @@
  *   GET  /defi/safety/rugcheck       → RugCheck report proxy
  *   GET  /defi/helius/token          → Helius DAS token metadata
  *   GET  /defi/helius/portfolio      → Helius DAS fungible token holdings
+ *   POST /ai/signals                 → Jev Router (OpenRouter) context signals for a detected address
  */
+
+import { fetchSignals, parseSignalsRequest } from "./jev";
 
 export interface Env {
   ANTHROPIC_API_KEY: string;
@@ -29,6 +32,7 @@ export interface Env {
   HELIUS_API_KEY: string;
   ASSEMBLYAI_API_KEY: string;
   REOWN_PROJECT_ID: string;
+  OPENROUTER_API_KEY?: string;
   RATE_LIMIT_KV: KVNamespace;
 }
 
@@ -314,6 +318,17 @@ async function handleHeliusPortfolio(url: URL, env: Env): Promise<Response> {
   return json(items);
 }
 
+async function handleAiSignals(req: Request, env: Env): Promise<Response> {
+  if (!env.OPENROUTER_API_KEY) return err("Signals unavailable", 503);
+  const parsed = parseSignalsRequest(await req.json<Record<string, unknown>>());
+  if (typeof parsed === "string") return err(parsed, 400);
+  try {
+    return json(await fetchSignals(parsed, env.OPENROUTER_API_KEY));
+  } catch (e) {
+    return err(e instanceof Error ? e.message : "Signals failed", 502);
+  }
+}
+
 async function handleAiDeepExtension(req: Request, env: Env): Promise<Response> {
   const body = await req.json<Record<string, unknown>>();
 
@@ -504,6 +519,9 @@ export default {
       }
       if (url.pathname === "/ai/deep" && req.method === "POST") {
         return handleAiDeepExtension(req, env);
+      }
+      if (url.pathname === "/ai/signals" && req.method === "POST") {
+        return handleAiSignals(req, env);
       }
       if (url.pathname === "/defi/jupiter/quote") {
         return handleJupiterQuote(url);

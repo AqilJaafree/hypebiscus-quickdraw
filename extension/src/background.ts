@@ -9,6 +9,7 @@ import type {
 } from "./types";
 import { DEFAULT_SKILL_SETTINGS } from "./types";
 import type { TweetContext } from "./tweet-context";
+import type { JevSignals } from "./jev-signals";
 
 declare const __WORKER_URL__: string;
 declare const __EXTENSION_SECRET__: string;
@@ -28,6 +29,10 @@ const safetyCache = new Map<string, CacheEntry<SafetyScore>>();
 const priceCache  = new Map<string, CacheEntry<TokenPrice | null>>();
 const dedupMap    = new Map<string, number>();
 
+const signalsCache = new Map<string, CacheEntry<JevSignals>>();
+
+const SIGNALS_TTL_MS = 600_000;
+const SIGNALS_CACHE_MAX = 200;
 const SAFETY_TTL_MS = 300_000;
 const PRICE_TTL_MS  =  15_000;
 const DEDUP_MS      =  30_000;
@@ -193,6 +198,7 @@ chrome.runtime.onConnect.addListener((port) => {
       safety: { score: number; label: string; summary: string };
       price: { usd: number; symbol: string } | null;
       tweetContext?: TweetContext | null;
+      narrationHint?: string | null;
     };
     try {
       const system = "You are a concise DeFi analyst for Solana traders. Write 1-2 sentences about the token's risk and key facts. Be direct. No disclaimers.";
@@ -212,7 +218,7 @@ chrome.runtime.onConnect.addListener((port) => {
         `Safety score: ${req.safety.score}/100 (${req.safety.label})`,
         `Details: ${req.safety.summary}`,
         req.price ? `Price: $${req.price.usd.toFixed(6)} (${req.price.symbol})` : "Price: unavailable",
-      ].join("\n") + tweetContextStr;
+      ].join("\n") + tweetContextStr + (req.narrationHint ? `\n${req.narrationHint}` : "");
 
       const resp = await fetch(`${WORKER_URL}/ai/fast`, {
         method: "POST",
@@ -349,6 +355,39 @@ async function handleMessage(msg: BgRequest, respond: (r: BgResponse) => void): 
       dedupMap.set(msg.address, Date.now());
       const data = await getTokenData(msg.address);
       chrome.storage.local.set({ lastToken: msg.address }).catch(() => {});
+      respond({ ok: true, data });
+      return;
+    }
+
+    if (msg.type === "get_signals") {
+      const cacheKey = `${msg.address}:${msg.text}`;
+      const cached = signalsCache.get(cacheKey);
+      if (isFresh(cached)) { respond({ ok: true, data: cached.data }); return; }
+
+      const resp = await fetch(`${WORKER_URL}/ai/signals`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Quickdraw-Client": "extension",
+          "Authorization": `Bearer ${EXTENSION_SECRET}`,
+        },
+        body: JSON.stringify({
+          address: msg.address,
+          text: msg.text,
+          author: msg.author,
+          tokenName: msg.tokenName,
+          tokenSymbol: msg.tokenSymbol,
+          jupiterVerified: msg.jupiterVerified,
+        }),
+      });
+      if (!resp.ok) { respond({ ok: false, error: "Signals unavailable" }); return; }
+      const data = await resp.json() as JevSignals;
+
+      if (signalsCache.size >= SIGNALS_CACHE_MAX) {
+        const oldest = signalsCache.keys().next().value;
+        if (oldest !== undefined) signalsCache.delete(oldest);
+      }
+      signalsCache.set(cacheKey, { data, expiresAt: Date.now() + SIGNALS_TTL_MS });
       respond({ ok: true, data });
       return;
     }

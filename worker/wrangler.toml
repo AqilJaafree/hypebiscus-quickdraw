@@ -9,6 +9,7 @@ compatibility_flags = ["nodejs_compat"]
 # APP_SECRET = ""        # shared with the Rust binary for HMAC verification
 # HELIUS_API_KEY = ""
 # ASSEMBLYAI_API_KEY = ""
+# OPENROUTER_API_KEY = ""  # Jev Router context signals (/ai/signals); optional — route returns 503 without it
 
 [[kv_namespaces]]
 binding = "RATE_LIMIT_KV"

@@ -2,6 +2,7 @@ import type { SafetyScore, TokenPrice, WalletState, PortfolioItem } from "./type
 import { DS, safetyColor } from "./styles";
 import { sendBg } from "./shared";
 import { buildTradePanel } from "./skills/trade";
+import type { SignalFlag } from "./jev-signals";
 
 const HOST_ID = "quickdraw-host";
 
@@ -119,6 +120,19 @@ export class PopupController {
     }
   }
 
+  showSignals(flags: SignalFlag[]): void {
+    const el = this.shadow.getElementById("qd-signals");
+    if (!el || !flags.length) return;
+    el.textContent = "";
+    for (const f of flags) {
+      const chip = document.createElement("span");
+      chip.className = `qd-chip qd-chip-${f.severity}`;
+      chip.textContent = f.label;
+      el.appendChild(chip);
+    }
+    el.style.display = "flex";
+  }
+
   appendNarration(delta: string): void {
     const el = this.shadow.getElementById("qd-narration");
     if (!el) return;
@@ -184,6 +198,11 @@ function buildShell(address: string): string {
   .qd-price-row { padding: 8px 12px 4px; display: flex; align-items: center; gap: 10px; }
   #qd-price { font-size: 13px; color: #fff; font-weight: 700; }
   #qd-change { font-size: 12px; font-weight: 700; }
+  #qd-signals { display: none; flex-wrap: wrap; gap: 4px; padding: 2px 12px 6px; }
+  .qd-chip { font-size: 9px; font-weight: 700; letter-spacing: 0.06em; padding: 2px 5px; border: 1px solid; }
+  .qd-chip-risk { color: ${DS.danger}; border-color: ${DS.danger}; }
+  .qd-chip-caution { color: ${DS.caution}; border-color: ${DS.caution}; }
+  .qd-chip-info { color: #888; border-color: #444; }
   #qd-narration { display: none; padding: 6px 12px 8px; font-size: 10px; color: #666;
     line-height: 1.5; font-style: italic; border-top: 1px solid #1e1e1e; }
   .qd-sep { height: 1px; background: #1e1e1e; }
@@ -214,6 +233,7 @@ function buildShell(address: string): string {
     <span id="qd-price"></span>
     <span id="qd-change"></span>
   </div>
+  <div id="qd-signals"></div>
   <div id="qd-narration"></div>
   <div class="qd-sep"></div>
   <div id="qd-actions-wrap">

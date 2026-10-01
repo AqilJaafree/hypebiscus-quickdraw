@@ -135,6 +135,8 @@ export type BgRequest =
   | { type: "set_skill_settings"; settings: SkillSettings }
   | { type: "quote_multi"; inputMint: string; outputMint: string; amountLamports: number }
   | { type: "get_portfolio" }
+  | { type: "get_signals"; address: string; text: string; author: string | null;
+      tokenName: string | null; tokenSymbol: string | null; jupiterVerified: boolean }
   | { type: "connect_wallet_reown" }
   | { type: "connect_wallet_injected" }
   | { type: "execute_swap"; inputMint: string; outputMint: string; amountLamports: number; walletAddress: string };
