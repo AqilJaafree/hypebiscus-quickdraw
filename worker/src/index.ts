@@ -9,7 +9,8 @@
  *
  * Routes:
  *   GET  /health                     → liveness probe
- *   POST /ai/fast                    → claude-haiku-4-5-20251001 (SSE)
+ *   POST /ai/fast                    → claude-haiku-4-5-20251001 (SSE); extension clients
+ *                                      send token data only, the prompt is built here
  *   POST /ai/deep                    → claude-sonnet-4-6 (SSE)
  *   GET  /market/pulse               → SOL price + Fear & Greed (cached 5min)
  *   GET  /transcribe-token           → AssemblyAI temporary JWT
@@ -24,6 +25,7 @@
  */
 
 import { fetchSignals, parseSignalsRequest } from "./jev";
+import { buildNarrationBody, parseNarrationRequest } from "./narration";
 
 export interface Env {
   ANTHROPIC_API_KEY: string;
@@ -135,6 +137,35 @@ async function handleAi(req: Request, env: Env, model: string): Promise<Response
   });
 
   // Stream SSE end-to-end — never buffer
+  return new Response(upstream.body, {
+    status: upstream.status,
+    headers: {
+      ...cors,
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      "X-Accel-Buffering": "no",
+    },
+  });
+}
+
+// Extension narration: structured input only, prompt and limits fixed server-side.
+async function handleAiFastExtension(req: Request, env: Env): Promise<Response> {
+  const body = await req.json<Record<string, unknown>>().catch(() => null);
+  if (!body) return err("Invalid JSON body");
+  const parsed = parseNarrationRequest(body);
+  if (typeof parsed === "string") return err(parsed);
+
+  const upstream = await fetch(`${ANTHROPIC_BASE}/messages`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-api-key": env.ANTHROPIC_API_KEY,
+      "anthropic-version": "2023-06-01",
+    },
+    body: JSON.stringify(buildNarrationBody(parsed)),
+  });
+  if (!upstream.ok) return err(`Anthropic error ${upstream.status}`, 502);
+
   return new Response(upstream.body, {
     status: upstream.status,
     headers: {
@@ -604,7 +635,7 @@ export default {
         return err("Too many requests", 429);
       }
       if (url.pathname === "/ai/fast" && req.method === "POST") {
-        return handleAi(req, env, "claude-haiku-4-5-20251001");
+        return handleAiFastExtension(req, env);
       }
       if (url.pathname === "/ai/deep" && req.method === "POST") {
         return handleAiDeepExtension(req, env);
