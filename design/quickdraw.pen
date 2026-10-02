@@ -1,5 +1,5 @@
 {
-  "version": "2.14",
+  "version": "2.20",
   "children": [
     {
       "type": "frame",
@@ -288,6 +288,7 @@
                 "bottom": 2
               },
               "strokeAlignment": "inner",
+              "strokeLinejoin": "round",
               "padding": [
                 0,
                 7
@@ -445,6 +446,7 @@
                     "bottom": 1
                   },
                   "strokeAlignment": "inner",
+                  "strokeLinejoin": "round",
                   "padding": [
                     0,
                     4
@@ -2287,6 +2289,7 @@
                 "bottom": 2
               },
               "strokeAlignment": "inner",
+              "strokeLinejoin": "round",
               "padding": [
                 0,
                 7
@@ -2985,6 +2988,17 @@
           ]
         }
       ]
+    },
+    {
+      "type": "text",
+      "id": "scUb1",
+      "x": -498,
+      "y": 453,
+      "fill": "#000000",
+      "content": "https://superteam.fun/earn/listing/superteam-my-x-superscrypt-build-global-buatan-malaysia",
+      "fontFamily": "Inter",
+      "fontSize": 12,
+      "fontWeight": "normal"
     }
   ],
   "fileToken": "b34b1d6b-fb63-4ada-b203-4ea31ab0211e"
