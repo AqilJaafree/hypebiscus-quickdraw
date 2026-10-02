@@ -32,22 +32,41 @@ chrome.storage.onChanged.addListener((changes, area) => {
 const lastTriggerMap = new Map<string, number>();
 const CONTENT_DEDUP_MS = 30_000;
 
+// Bumped by every user selection and every tab switch. A trigger that started
+// before the bump is stale: its results must not open or update a popup.
+let epoch = 0;
+let narrationPort: chrome.runtime.Port | null = null;
+
+function closeActivePopup(): void {
+  removePopup();
+  activeController = null;
+  narrationPort?.disconnect(); // background aborts the upstream stream
+  narrationPort = null;
+}
+
 async function triggerAddress(address: string, rawX: number, rawY: number, sourceEl?: Element, source: "selection" | "mutation" = "mutation"): Promise<void> {
   if (!detectionEnabled) return;
   if (currentSiteMode === "off") return;
   if (currentSiteMode === "selection" && source !== "selection") return;
 
-  const now = Date.now();
-  const last = lastTriggerMap.get(address);
-  if (last && now - last < CONTENT_DEDUP_MS) return;
-
-  // Prune expired entries to prevent the map growing unbounded on long sessions.
-  for (const [key, ts] of lastTriggerMap) {
-    if (now - ts >= CONTENT_DEDUP_MS) lastTriggerMap.delete(key);
-  }
-  lastTriggerMap.set(address, now);
-
   const passive = source === "mutation";
+  if (passive && document.hidden) return;
+
+  // Dedup only scroll detections. A selection is deliberate: selecting the
+  // same address again (or in another tab) must always show the popup.
+  if (passive) {
+    const now = Date.now();
+    const last = lastTriggerMap.get(address);
+    if (last && now - last < CONTENT_DEDUP_MS) return;
+    // Prune expired entries to prevent the map growing unbounded on long sessions.
+    for (const [key, ts] of lastTriggerMap) {
+      if (now - ts >= CONTENT_DEDUP_MS) lastTriggerMap.delete(key);
+    }
+    lastTriggerMap.set(address, now);
+  }
+
+  const myEpoch = passive ? epoch : ++epoch;
+  const stale = (): boolean => epoch !== myEpoch || document.hidden;
   const tweetContext = extractTweetContext(sourceEl);
   const contextText = tweetContext?.tweetText ?? extractSurroundingText(sourceEl);
 
@@ -61,7 +80,7 @@ async function triggerAddress(address: string, rawX: number, rawY: number, sourc
       x,
       y,
       callbacks: {
-        onDismiss: () => { activeController = null; },
+        onDismiss: () => { if (activeController === c) closeActivePopup(); },
         onGear: () => { chrome.runtime.sendMessage({ type: "OPEN_POPUP" }).catch(() => {}); },
         onBuy: () => {
           const ticker = tokenData?.price?.symbol ?? address.slice(0, 6);
@@ -80,11 +99,13 @@ async function triggerAddress(address: string, rawX: number, rawY: number, sourc
 
   // A selection is an explicit request — show the popup immediately. Scroll
   // detections wait until we know the address is a token worth showing.
+  if (!passive) closeActivePopup();
   let controller: PopupController | null = passive ? null : openPopup();
 
   const [fetchResult] = await Promise.allSettled([
-    sendBg<TokenData>({ type: "fetch_token", address }),
+    sendBg<TokenData>({ type: "fetch_token", address, force: !passive }),
   ]);
+  if (stale()) return;
 
   if (fetchResult.status === "rejected") {
     if (passive) return; // wallet / tx / non-token base58 — stay quiet
@@ -102,6 +123,7 @@ async function triggerAddress(address: string, rawX: number, rawY: number, sourc
   const verdict = signals
     ? await signals.within(passive ? PASSIVE_SIGNALS_WAIT_MS : SELECTION_SIGNALS_WAIT_MS)
     : null;
+  if (stale()) return;
 
   if (passive) {
     if (verdict?.suppressPassive) return;
@@ -125,12 +147,14 @@ async function triggerAddress(address: string, rawX: number, rawY: number, sourc
   // Stream Haiku analysis via background port — avoids ad-blocker blocks on content script fetches
   const narrated = controller;
   try {
+    narrationPort?.disconnect();
     const port = chrome.runtime.connect({ name: "narration" });
+    narrationPort = port;
     port.onMessage.addListener((msg: { type: string; text?: string }) => {
       if (msg.type === "chunk" && msg.text) narrated.appendNarration(msg.text);
-      if (msg.type === "done") port.disconnect();
+      if (msg.type === "done") { port.disconnect(); if (narrationPort === port) narrationPort = null; }
     });
-    port.onDisconnect.addListener(() => {});
+    port.onDisconnect.addListener(() => { if (narrationPort === port) narrationPort = null; });
     port.postMessage({
       address,
       safety: { score: tokenData.safety.score, label: tokenData.safety.label, summary: tokenData.safety.summary },
@@ -207,11 +231,11 @@ document.addEventListener("mouseup", onSelectionChange, true);
 document.addEventListener("keyup", (e) => { if (e.shiftKey) onSelectionChange(); }, true);
 
 document.addEventListener("keydown", (e) => {
-  if (e.key === "Escape") { removePopup(); activeController = null; }
+  if (e.key === "Escape") closeActivePopup();
 });
 document.addEventListener("mousedown", (e) => {
   const host = document.getElementById("quickdraw-host");
-  if (host && !host.contains(e.target as Node)) { removePopup(); activeController = null; }
+  if (host && !host.contains(e.target as Node)) closeActivePopup();
 });
 
 // ── MutationObserver ───────────────────────────────────────────────────────────
@@ -219,7 +243,7 @@ let mutationQueue: MutationRecord[] = [];
 let mutationTimer: ReturnType<typeof setTimeout> | null = null;
 
 function processMutations(): void {
-  if (!detectionEnabled) { mutationQueue = []; return; }
+  if (!detectionEnabled || document.hidden) { mutationQueue = []; return; }
   if (currentSiteMode === "off") { mutationQueue = []; return; }
   const batch = mutationQueue;
   mutationQueue = [];
@@ -264,12 +288,25 @@ function* textNodesIn(node: Node): Generator<Text> {
 }
 
 const observer = new MutationObserver((mutations) => {
+  if (document.hidden) return; // background tabs don't scan or spend API calls
   mutationQueue.push(...mutations);
   if (mutationTimer) clearTimeout(mutationTimer);
   mutationTimer = setTimeout(processMutations, 500);
 });
 
 observer.observe(document.body, { childList: true, subtree: true });
+
+// ── Tab switching ─────────────────────────────────────────────────────────────
+// Leaving the tab closes its popup and cancels in-flight work, so the tab you
+// switch to gets the API calls. A popup mid-swap stays: the Reown signing tab
+// hides this one, and closing it would lose the swap result.
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden) return;
+  mutationQueue = [];
+  if (activeController?.isTrading) return;
+  epoch++;
+  closeActivePopup();
+});
 
 sendBg<boolean>({ type: "get_detection_enabled" })
   .then((enabled) => { detectionEnabled = enabled; })

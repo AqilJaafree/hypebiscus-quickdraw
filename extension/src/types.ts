@@ -119,7 +119,7 @@ export interface DeepPortError {
 export type DeepPortMessage = DeepPortChunk | DeepPortDone | DeepPortError;
 
 export type BgRequest =
-  | { type: "fetch_token"; address: string }
+  | { type: "fetch_token"; address: string; force?: boolean }
   | { type: "get_wallet" }
   | { type: "set_wallet"; wallet: WalletState }
   | { type: "get_detection_enabled" }
