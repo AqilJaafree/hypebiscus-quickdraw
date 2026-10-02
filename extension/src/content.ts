@@ -98,8 +98,9 @@ async function triggerAddress(address: string, rawX: number, rawY: number, sourc
 
   // A user-selected popup is already on screen, so don't hold its narration
   // hostage to a slow route; passive detections can afford the full wait.
-  const verdict = contextText
-    ? await fetchVerdict(address, contextText, tweetContext, tokenData, passive ? PASSIVE_SIGNALS_WAIT_MS : SELECTION_SIGNALS_WAIT_MS)
+  const signals = contextText ? requestVerdict(address, contextText, tweetContext, tokenData) : null;
+  const verdict = signals
+    ? await signals.within(passive ? PASSIVE_SIGNALS_WAIT_MS : SELECTION_SIGNALS_WAIT_MS)
     : null;
 
   if (passive) {
@@ -110,7 +111,16 @@ async function triggerAddress(address: string, rawX: number, rawY: number, sourc
   if (!controller) return;
 
   controller.showToken(tokenData.safety, tokenData.price);
-  if (verdict) controller.showSignals(verdict.flags);
+  if (verdict) {
+    controller.showSignals(verdict.flags);
+  } else if (signals) {
+    // Jev Router can take 6-7 s; add the chips to the popup when they land,
+    // as long as it is still the one on screen.
+    const shown = controller;
+    void signals.final.then(late => {
+      if (late && activeController === shown) shown.showSignals(late.flags);
+    });
+  }
 
   // Stream Haiku analysis via background port — avoids ad-blocker blocks on content script fetches
   const narrated = controller;
@@ -145,32 +155,37 @@ function extractSurroundingText(el: Element | undefined): string | null {
   return text.length > 50 ? text.slice(0, CONTEXT_MAX_CHARS) : null;
 }
 
-async function fetchVerdict(
+interface PendingVerdict {
+  /** Resolves with the verdict, or null on failure. Never rejects. */
+  final: Promise<SignalVerdict | null>;
+  /** The verdict if it arrives within `ms`, otherwise null (the request keeps running). */
+  within(ms: number): Promise<SignalVerdict | null>;
+}
+
+function requestVerdict(
   address: string,
   text: string,
   tweet: TweetContext | null,
   token: TokenData,
-  waitMs: number,
-): Promise<SignalVerdict | null> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const timeout = new Promise<null>(resolve => { timer = setTimeout(() => resolve(null), waitMs); });
-  try {
-    const request = sendBg<JevSignals>({
-      type: "get_signals",
-      address,
-      text,
-      author: tweet?.authorHandle ?? null,
-      tokenName: token.price?.name ?? null,
-      tokenSymbol: token.price?.symbol ?? null,
-      jupiterVerified: token.safety.verified,
-    });
-    const signals = await Promise.race([request, timeout]);
-    return signals ? deriveVerdict(signals) : null;
-  } catch {
-    return null; // signals are additive — never block the popup on them
-  } finally {
-    clearTimeout(timer);
-  }
+): PendingVerdict {
+  const final = sendBg<JevSignals>({
+    type: "get_signals",
+    address,
+    text,
+    author: tweet?.authorHandle ?? null,
+    tokenName: token.price?.name ?? null,
+    tokenSymbol: token.price?.symbol ?? null,
+    jupiterVerified: token.safety.verified,
+  }).then(deriveVerdict, () => null); // signals are additive — never block the popup on them
+
+  return {
+    final,
+    within(ms) {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const timeout = new Promise<null>(resolve => { timer = setTimeout(() => resolve(null), ms); });
+      return Promise.race([final, timeout]).finally(() => clearTimeout(timer));
+    },
+  };
 }
 
 // ── Selection detection ────────────────────────────────────────────────────────
@@ -208,23 +223,44 @@ function processMutations(): void {
   if (currentSiteMode === "off") { mutationQueue = []; return; }
   const batch = mutationQueue;
   mutationQueue = [];
+  let budget = MAX_TEXT_NODES_PER_BATCH;
   for (const mutation of batch) {
-    for (const node of Array.from(mutation.addedNodes)) {
-      if (node.nodeType !== Node.TEXT_NODE) continue;
-      const text = (node as Text).textContent ?? "";
-      if (text.length < 32) continue;
-      const detections = detectInText(text);
-      if (!detections.length) continue;
-      const parent = node.parentElement;
-      const rect = parent?.getBoundingClientRect();
-      if (!rect) continue;
-      const first = detections[0];
-      if (first.type === "address") {
-        triggerAddress(first.value, rect.left, rect.bottom, parent ?? undefined);
-        return;
+    for (const added of Array.from(mutation.addedNodes)) {
+      for (const node of textNodesIn(added)) {
+        if (--budget < 0) return;
+        const text = node.textContent ?? "";
+        if (text.length < 32) continue;
+        const detections = detectInText(text);
+        if (!detections.length) continue;
+        const parent = node.parentElement;
+        const rect = parent?.getBoundingClientRect();
+        if (!rect) continue;
+        const first = detections[0];
+        if (first.type === "address") {
+          triggerAddress(first.value, rect.left, rect.bottom, parent ?? undefined);
+          return;
+        }
       }
     }
   }
+}
+
+// Sites like X and Telegram Web insert whole element subtrees (a tweet's
+// <article>), not bare text nodes, so walk the text inside added elements.
+// Capped per batch to keep long infinite-scroll pages cheap.
+const MAX_TEXT_NODES_PER_BATCH = 2_000;
+const SKIP_TAGS = new Set(["SCRIPT", "STYLE", "NOSCRIPT", "TEXTAREA", "INPUT"]);
+
+function* textNodesIn(node: Node): Generator<Text> {
+  if (node.nodeType === Node.TEXT_NODE) { yield node as Text; return; }
+  if (node.nodeType !== Node.ELEMENT_NODE) return;
+  const el = node as Element;
+  if (SKIP_TAGS.has(el.tagName) || el.id === "quickdraw-host") return;
+  const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT, {
+    acceptNode: (t) => (t.parentElement && SKIP_TAGS.has(t.parentElement.tagName)
+      ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT),
+  });
+  for (let t = walker.nextNode(); t; t = walker.nextNode()) yield t as Text;
 }
 
 const observer = new MutationObserver((mutations) => {
