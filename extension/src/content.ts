@@ -320,3 +320,21 @@ window.addEventListener("message", (event) => {
   if (msg.source !== "quickdraw-connect" || msg.type !== "set_wallet" || !msg.wallet) return;
   chrome.runtime.sendMessage({ type: "set_wallet", wallet: msg.wallet }).catch(() => {});
 });
+
+// Relay for the hosted sign page (email wallet swaps). The page can't call
+// chrome.runtime itself, so it asks via postMessage with a request id and we
+// post the background's response back. Only the three signing requests pass;
+// the background re-checks that they came from the sign page's origin.
+const SIGN_REQUESTS = new Set(["sign_get_pending", "sign_build", "sign_result"]);
+window.addEventListener("message", (event) => {
+  if (event.origin !== "https://quickdraw-auth.pages.dev" || event.source !== window) return;
+  const msg = event.data as { source?: string; id?: unknown; request?: { type?: unknown } };
+  if (msg?.source !== "quickdraw-sign" || typeof msg.id !== "string") return;
+  if (!msg.request || !SIGN_REQUESTS.has(String(msg.request.type))) return;
+  chrome.runtime.sendMessage(msg.request, (response: unknown) => {
+    const reply = chrome.runtime.lastError
+      ? { ok: false, error: chrome.runtime.lastError.message }
+      : response;
+    window.postMessage({ source: "quickdraw-ext", id: msg.id, response: reply }, event.origin);
+  });
+});

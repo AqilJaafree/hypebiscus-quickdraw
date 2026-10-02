@@ -137,16 +137,27 @@ export type BgRequest =
       tokenName: string | null; tokenSymbol: string | null; jupiterVerified: boolean }
   | { type: "connect_wallet_reown" }
   | { type: "connect_wallet_injected" }
-  | { type: "execute_swap"; inputMint: string; outputMint: string; amountLamports: number; walletAddress: string };
+  | { type: "execute_swap"; inputMint: string; outputMint: string; amountLamports: number; walletAddress: string }
+  // From the hosted sign page (quickdraw-auth.pages.dev) via the content-script relay:
+  | { type: "sign_get_pending" }
+  | { type: "sign_build" }
+  | { type: "sign_result"; signature?: string; error?: string };
 
 export interface SwapResult {
   signature: string;
   explorer: string;
 }
 
+/**
+ * A swap waiting to be signed by the email (Reown) wallet on the hosted sign
+ * page. Only parameters are stored: the transaction is built when the user
+ * confirms, because logging in can outlast a Jupiter transaction (~1 min).
+ */
 export interface PendingSwap {
-  txBase64: string;
-  adapter: "jupiter" | "raydium";
+  inputMint: string;
+  outputMint: string;
+  amountLamports: number;
+  walletAddress: string;
   expiresAt: number;
 }
 

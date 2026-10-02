@@ -327,16 +327,90 @@ async function findUsableTab(): Promise<chrome.tabs.Tab | undefined> {
   return tabs.find(t => t.active && isUsable(t)) ?? tabs.find(isUsable);
 }
 
+// ── Swap transaction ───────────────────────────────────────────────────────────
+async function buildSwapTx(
+  inputMint: string,
+  outputMint: string,
+  amountLamports: number,
+  walletAddress: string,
+): Promise<string> {
+  const resp = await fetch(`${WORKER_URL}/defi/jupiter/swap`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Quickdraw-Client": "extension",
+      "Authorization": `Bearer ${EXTENSION_SECRET}`,
+    },
+    body: JSON.stringify({
+      inputMint,
+      outputMint,
+      amount: amountLamports,
+      slippageBps: 50,
+      userPublicKey: walletAddress,
+    }),
+  });
+  if (!resp.ok) throw new Error(await resp.text().catch(() => "Swap build failed"));
+  const { txBase64 } = await resp.json() as { txBase64: string };
+  return txBase64;
+}
+
+// ── Email (Reown) wallet signing ───────────────────────────────────────────────
+// The email wallet's session lives in Reown's secure iframe, whose storage is
+// partitioned per site — and only quickdraw-auth.pages.dev is allowlisted in
+// the Reown dashboard. So signing happens on the hosted page where the user
+// logged in, which talks to us through the content-script relay.
+const SIGN_PAGE_ORIGIN = "https://quickdraw-auth.pages.dev";
+const SIGN_PAGE_URL = `${SIGN_PAGE_ORIGIN}/sign.html`;
+const SIGN_TIMEOUT_MS = 5 * 60_000; // room for an email login (approval link + code)
+const SIGNATURE_RE = /^[1-9A-HJ-NP-Za-km-z]{64,90}$/;
+
+async function readPendingSwap(): Promise<PendingSwap> {
+  const { pendingSwap } = await chrome.storage.session.get("pendingSwap") as { pendingSwap?: PendingSwap };
+  if (!pendingSwap || Date.now() > pendingSwap.expiresAt) {
+    throw new Error("No pending swap, or it expired. Start the swap again from Quickdraw.");
+  }
+  return pendingSwap;
+}
+
 // ── Message handler ────────────────────────────────────────────────────────────
 chrome.runtime.onMessage.addListener(
-  (msg: BgRequest, _sender, sendResponse: (r: BgResponse) => void) => {
-    handleMessage(msg, sendResponse);
+  (msg: BgRequest, sender, sendResponse: (r: BgResponse) => void) => {
+    handleMessage(msg, sendResponse, sender);
     return true;
   },
 );
 
-async function handleMessage(msg: BgRequest, respond: (r: BgResponse) => void): Promise<void> {
+async function handleMessage(
+  msg: BgRequest,
+  respond: (r: BgResponse) => void,
+  sender?: chrome.runtime.MessageSender,
+): Promise<void> {
   try {
+    if (msg.type === "sign_get_pending" || msg.type === "sign_build" || msg.type === "sign_result") {
+      // Only the hosted sign page (relayed by our content script) may drive signing.
+      if (sender?.origin !== SIGN_PAGE_ORIGIN) {
+        respond({ ok: false, error: "Not allowed" });
+        return;
+      }
+      if (msg.type === "sign_get_pending") {
+        respond({ ok: true, data: await readPendingSwap() });
+        return;
+      }
+      if (msg.type === "sign_build") {
+        const p = await readPendingSwap();
+        respond({ ok: true, data: await buildSwapTx(p.inputMint, p.outputMint, p.amountLamports, p.walletAddress) });
+        return;
+      }
+      // sign_result: build the explorer link here rather than trusting the page.
+      const swapResult = msg.signature && SIGNATURE_RE.test(msg.signature)
+        ? { signature: msg.signature, explorer: `https://solscan.io/tx/${msg.signature}` }
+        : { error: String(msg.error ?? "Signing failed").slice(0, 300) };
+      await chrome.storage.session.set({ swapResult });
+      await chrome.storage.session.remove("pendingSwap");
+      respond({ ok: true, data: null });
+      return;
+    }
+
     if (msg.type === "fetch_token") {
       // `force`: the user selected this address on purpose (possibly again, or
       // in another tab) — only passive scroll detections are deduplicated.
@@ -643,57 +717,35 @@ async function handleMessage(msg: BgRequest, respond: (r: BgResponse) => void): 
         return;
       }
 
-      // 1. Fetch the unsigned swap transaction from the worker
-      const swapResp = await fetch(`${WORKER_URL}/defi/jupiter/swap`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-Quickdraw-Client": "extension",
-          "Authorization": `Bearer ${EXTENSION_SECRET}`,
-        },
-        body: JSON.stringify({
-          inputMint: msg.inputMint,
-          outputMint: msg.outputMint,
-          amount: msg.amountLamports,
-          slippageBps: 50,
-          userPublicKey: msg.walletAddress,
-        }),
-      });
-      if (!swapResp.ok) {
-        const errText = await swapResp.text().catch(() => "Swap build failed");
-        respond({ ok: false, error: errText });
-        return;
-      }
-      const { txBase64 } = await swapResp.json() as { txBase64: string };
-
-      // 2. Branch on wallet adapter — Reown uses a dedicated sign tab
       const { wallet: storedWallet } = await chrome.storage.local.get("wallet") as
         { wallet?: { adapter: string | null } };
 
       if (storedWallet?.adapter === "reown") {
-        // Reown embedded wallet: sign via dedicated extension tab
+        // Email wallet: sign on the hosted page (see SIGN_PAGE_ORIGIN above).
         const pending: PendingSwap = {
-          txBase64,
-          adapter: "jupiter",
-          expiresAt: Date.now() + 60_000,
+          inputMint: msg.inputMint,
+          outputMint: msg.outputMint,
+          amountLamports: msg.amountLamports,
+          walletAddress: msg.walletAddress,
+          expiresAt: Date.now() + SIGN_TIMEOUT_MS,
         };
         await chrome.storage.session.remove("swapResult");
         await chrome.storage.session.set({ pendingSwap: pending });
 
-        const signUrl = chrome.runtime.getURL("sign.html");
         try {
-          await chrome.tabs.create({ url: signUrl, active: true });
+          await chrome.tabs.create({ url: SIGN_PAGE_URL, active: true });
         } catch (e) {
           respond({ ok: false, error: `Could not open sign tab: ${String(e)}` });
           return;
         }
 
-        // Poll chrome.storage.session for result (sign tab writes swapResult and closes)
+        // The sign page reports back via sign_result, which writes swapResult.
         const result = await new Promise<SwapResult>((resolve, reject) => {
           const timeout = setTimeout(() => {
             clearInterval(interval);
-            reject(new Error("Signing timed out (90s)"));
-          }, 90_000);
+            chrome.storage.session.remove("pendingSwap").catch(() => {});
+            reject(new Error("Signing timed out (5 min)"));
+          }, SIGN_TIMEOUT_MS);
           const interval = setInterval(async () => {
             try {
               const { swapResult } = await chrome.storage.session.get("swapResult") as
@@ -703,13 +755,22 @@ async function handleMessage(msg: BgRequest, respond: (r: BgResponse) => void): 
               clearTimeout(timeout);
               await chrome.storage.session.remove("swapResult");
               if (swapResult.error) reject(new Error(swapResult.error));
-              else if (!swapResult.signature || !swapResult.explorer) reject(new Error("Sign tab returned incomplete result"));
+              else if (!swapResult.signature || !swapResult.explorer) reject(new Error("Sign page returned incomplete result"));
               else resolve({ signature: swapResult.signature, explorer: swapResult.explorer });
             } catch { /* storage read error — keep polling */ }
           }, 500);
         });
 
         respond({ ok: true, data: result });
+        return;
+      }
+
+      // Injected wallet (Phantom/Solflare): build now and sign in the user's tab.
+      let txBase64: string;
+      try {
+        txBase64 = await buildSwapTx(msg.inputMint, msg.outputMint, msg.amountLamports, msg.walletAddress);
+      } catch (e) {
+        respond({ ok: false, error: e instanceof Error ? e.message : "Swap build failed" });
         return;
       }
 
