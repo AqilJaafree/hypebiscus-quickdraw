@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Quickdraw — Sign Swap</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: #0e0e0e;
+      color: #f5f0e8;
+      font-family: ui-monospace, 'Space Mono', monospace;
+      display: flex; align-items: center; justify-content: center;
+      min-height: 100vh;
+    }
+
+    .card {
+      background: #141414;
+      border: 1px solid #2a2a2a;
+      box-shadow: 0 0 0 1px #000, 4px 4px 0 #000;
+      width: 320px;
+    }
+
+    .hd {
+      display: flex; justify-content: space-between; align-items: center;
+      padding: 14px 16px; border-bottom: 1px solid #1e1e1e;
+    }
+    .hd-title { color: #f5e642; font-size: 11px; font-weight: 700; letter-spacing: 3px; }
+    .hd-close {
+      background: none; border: none; color: #333; font-size: 14px;
+      cursor: pointer; font-family: inherit; padding: 2px 4px; line-height: 1;
+    }
+    .hd-close:hover { color: #666; }
+
+    .body { padding: 20px 16px; display: flex; flex-direction: column; gap: 12px; }
+
+    .sub { font-size: 10px; color: #666; letter-spacing: 0.04em; line-height: 1.6; }
+
+    #summary { display: none; flex-direction: column; gap: 6px; padding: 10px 12px;
+      background: #101010; border: 1px solid #222; }
+    .row { display: flex; justify-content: space-between; font-size: 11px; }
+    .row .k { color: #555; }
+    .row .v { color: #f5f0e8; font-weight: 700; }
+
+    .btn-primary {
+      display: none; padding: 10px 12px; background: #f5e642; color: #111;
+      border: 2px solid #c8bb35; font-family: inherit; font-size: 11px;
+      font-weight: 700; cursor: pointer; letter-spacing: 0.05em;
+    }
+    .btn-primary:hover { background: #f9ed5a; }
+    .btn-primary:disabled { opacity: 0.5; cursor: wait; }
+
+    .btn-secondary {
+      display: none; padding: 7px 10px; background: none; color: #555;
+      border: 1px solid #1e1e1e; font-family: inherit; font-size: 10px;
+      cursor: pointer; text-align: center;
+    }
+    .btn-secondary:hover { color: #999; border-color: #333; }
+
+    .foot { padding: 10px 16px; border-top: 1px solid #1a1a1a; min-height: 32px; }
+    #status { font-size: 10px; color: #8bf542; line-height: 1.5; }
+    #error  { font-size: 10px; color: #f54242; line-height: 1.5; }
+  </style>
+</head>
+<body>
+  <div class="card">
+
+    <div class="hd">
+      <span class="hd-title">QUICKDRAW · SIGN</span>
+      <button class="hd-close" id="btn-close">✕</button>
+    </div>
+
+    <div class="body">
+      <div class="sub">Approve this swap with your email wallet. Nothing is sent until you confirm.</div>
+
+      <div id="summary">
+        <div class="row"><span class="k">Pay</span><span class="v" id="sum-pay"></span></div>
+        <div class="row"><span class="k">Receive</span><span class="v" id="sum-get"></span></div>
+        <div class="row"><span class="k">Wallet</span><span class="v" id="sum-wallet"></span></div>
+      </div>
+
+      <button class="btn-primary"   id="btn-login">Log in with email →</button>
+      <button class="btn-primary"   id="btn-confirm">Confirm swap ↗</button>
+      <button class="btn-secondary" id="btn-switch">Use a different login</button>
+      <button class="btn-secondary" id="btn-cancel">Cancel swap</button>
+    </div>
+
+    <div class="foot">
+      <div id="status">Contacting Quickdraw extension…</div>
+      <div id="error"></div>
+    </div>
+
+  </div>
+  <script type="module" src="./sign.js"></script>
+</body>
+</html>

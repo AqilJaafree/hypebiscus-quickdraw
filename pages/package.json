@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "build": "esbuild connect.ts --bundle --outfile=connect.js --target=chrome111 --format=esm '--define:__REOWN_PROJECT_ID__=\"'$REOWN_PROJECT_ID'\"'",
+    "build": "esbuild connect.ts sign.ts --bundle --outdir=. --target=chrome111 --format=esm '--define:__REOWN_PROJECT_ID__=\"'$REOWN_PROJECT_ID'\"'",
     "deploy": "npm run build && wrangler pages deploy . --project-name quickdraw-auth"
   },
   "devDependencies": {
@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@reown/appkit": "^1.8.20",
-    "@reown/appkit-adapter-solana": "^1.8.20"
+    "@reown/appkit-adapter-solana": "^1.8.20",
+    "@solana/web3.js": "^1.99.0"
   }
 }
