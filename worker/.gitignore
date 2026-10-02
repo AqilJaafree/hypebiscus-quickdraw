@@ -4,3 +4,4 @@ auth-src/auth-dist/
 auth-src/auth-src/
 .dev.vars
 .wrangler/
+.eval/
