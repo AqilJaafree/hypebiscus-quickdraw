@@ -192,6 +192,11 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
 chrome.runtime.onConnect.addListener((port) => {
   if (port.name !== "narration") return;
 
+  // Stop streaming (and paying for) a summary nobody can see once the popup
+  // closes or the tab is switched away.
+  const abort = new AbortController();
+  port.onDisconnect.addListener(() => abort.abort());
+
   port.onMessage.addListener(async (rawMsg: unknown) => {
     // The worker builds the prompt from these fields (see worker/src/narration.ts).
     const req = rawMsg as {
@@ -216,6 +221,7 @@ chrome.runtime.onConnect.addListener((port) => {
           tweetContext: req.tweetContext ?? null,
           signalFlags: req.signalFlags ?? [],
         }),
+        signal: abort.signal,
       });
 
       if (!resp.ok || !resp.body) { port.postMessage({ type: "done" }); return; }
@@ -242,7 +248,10 @@ chrome.runtime.onConnect.addListener((port) => {
         }
       }
       port.postMessage({ type: "done" });
-    } catch { port.postMessage({ type: "done" }); }
+    } catch {
+      // Aborted or port already closed (popup dismissed / tab switched).
+      try { port.postMessage({ type: "done" }); } catch { /* port gone */ }
+    }
   });
 });
 
@@ -329,8 +338,10 @@ chrome.runtime.onMessage.addListener(
 async function handleMessage(msg: BgRequest, respond: (r: BgResponse) => void): Promise<void> {
   try {
     if (msg.type === "fetch_token") {
+      // `force`: the user selected this address on purpose (possibly again, or
+      // in another tab) — only passive scroll detections are deduplicated.
       const last = dedupMap.get(msg.address);
-      if (last && Date.now() - last < DEDUP_MS) {
+      if (!msg.force && last && Date.now() - last < DEDUP_MS) {
         respond({ ok: false, error: "dedup" });
         return;
       }

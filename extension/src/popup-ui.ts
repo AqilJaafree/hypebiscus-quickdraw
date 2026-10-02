@@ -77,6 +77,9 @@ export function removePopup(): void {
 }
 
 export class PopupController {
+  /** True once the trade panel is open — don't auto-close mid-swap. */
+  isTrading = false;
+
   constructor(
     private shadow: ShadowRoot,
     private host: HTMLElement,
@@ -148,6 +151,7 @@ export class PopupController {
   updateWallet(_wallet: WalletState): void {}
 
   async showTradePanel(outputMint: string, ticker: string, wallet: WalletState): Promise<void> {
+    this.isTrading = true;
     // Look up held balance for this token
     let heldBalance = 0;
     if (wallet.connected) {
