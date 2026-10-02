@@ -5,7 +5,8 @@
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "eval:narration": "esbuild scripts/eval-narration.ts --bundle --platform=node --format=esm --log-level=warning --outfile=.eval/eval-narration.mjs && node --env-file=../.env .eval/eval-narration.mjs"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20240208.0",
