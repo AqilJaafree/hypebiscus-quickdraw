@@ -85,7 +85,10 @@ const RESPONSE_SCHEMA = {
   properties: {
     address_role: { type: "string", enum: ROLES },
     role_confidence: { type: "number" },
-    shill_intensity: { type: "integer", enum: [0, 1, 2, 3] },
+    // No `enum` here: Gemini (which Jev Router sometimes picks) only supports
+    // enums on strings and answers `{}` when given an integer enum. The value
+    // is clamped to 0-3 in parseJevAnswer instead.
+    shill_intensity: { type: "integer" },
     phishing_probability: { type: "number" },
     impersonation_probability: { type: ["number", "null"] },
   },
@@ -150,9 +153,14 @@ function prob(v: unknown): number {
 }
 
 export function parseJevAnswer(raw: RawSignals, model: string, askedImpersonation: boolean): SignalsResponse {
-  const role = ROLES.includes(raw.address_role as typeof ROLES[number]) ? String(raw.address_role) : "unclear";
+  // An incomplete answer must fail loudly: defaulting missing fields to 0
+  // would tell the extension a phishing post is clean.
+  if (!ROLES.includes(raw.address_role as typeof ROLES[number]) || typeof raw.phishing_probability !== "number") {
+    throw new Error(`Jev Router (${model}) returned an incomplete answer`);
+  }
+  const role = String(raw.address_role);
   const shill = typeof raw.shill_intensity === "number" && isFinite(raw.shill_intensity)
-    ? Math.max(0, Math.min(3, raw.shill_intensity)) : 0;
+    ? Math.max(0, Math.min(3, Math.round(raw.shill_intensity))) : 0;
   return {
     model,
     role: { choice: role, confidence: prob(raw.role_confidence) },
