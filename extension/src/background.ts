@@ -554,7 +554,7 @@ async function handleMessage(
     if (msg.type === "connect_wallet_reown") {
       // Open the hosted connect page (https://) so injected wallets like Phantom are visible.
       // The page posts wallet state back via window.postMessage; content.ts relays it to background.
-      const connectUrl = "https://quickdraw-auth.pages.dev/connect.html";
+      const connectUrl = "https://quickdraw-auth.pages.dev/connect.html" + (msg.logout ? "?logout=1" : "");
       try {
         await chrome.tabs.create({ url: connectUrl, active: true });
         respond({ ok: true, data: null });

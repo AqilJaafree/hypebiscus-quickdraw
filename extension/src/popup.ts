@@ -151,6 +151,8 @@ function init(): void {
       const w: WalletState = { address: null, adapter: null, connected: false };
       chrome.storage.local.set({ wallet: w });
       sendBg({ type: "set_wallet", wallet: w }).catch(() => {});
+      // Email-wallet session lives on the hosted page's origin — wipe it there too.
+      if (currentWallet.adapter === "reown") sendBg({ type: "connect_wallet_reown", logout: true }).catch(() => {});
       window.close();
       return;
     }
