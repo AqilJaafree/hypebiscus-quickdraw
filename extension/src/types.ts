@@ -135,7 +135,7 @@ export type BgRequest =
   | { type: "get_portfolio" }
   | { type: "get_signals"; address: string; text: string; author: string | null;
       tokenName: string | null; tokenSymbol: string | null; jupiterVerified: boolean }
-  | { type: "connect_wallet_reown" }
+  | { type: "connect_wallet_reown"; logout?: boolean }
   | { type: "connect_wallet_injected" }
   | { type: "execute_swap"; inputMint: string; outputMint: string; amountLamports: number; walletAddress: string }
   // From the hosted sign page (quickdraw-auth.pages.dev) via the content-script relay:

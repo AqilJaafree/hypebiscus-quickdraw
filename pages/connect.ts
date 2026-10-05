@@ -48,7 +48,7 @@ function showConfirm(address: string): void {
     sendToExtension({ type: "set_wallet", wallet: { address, adapter: "reown", connected: true } });
     sectConfirm.style.display = "none";
     statusEl.textContent = "Connected — closing…";
-    setTimeout(() => window.close(), 700);
+    setTimeout(() => window.close(), 2_500);
   };
 }
 
@@ -60,8 +60,12 @@ function showRetry(): void {
 
 // ── AppKit ─────────────────────────────────────────────────────────────────────
 async function main(): Promise<void> {
-  // Wipe any stored session so AppKit can't auto-restore a previous connection.
-  clearAppKitStorage();
+  // The session persists between visits: the Reown email wallet's device approval
+  // lives in it, and the sign page (same origin) needs it for swaps. Sign-out is
+  // explicit — ?logout=1 (extension "Disconnect") or "Use different wallet".
+  const logout = new URLSearchParams(location.search).get("logout") === "1";
+  if (logout) clearAppKitStorage();
+  void navigator.storage?.persist?.().catch(() => {});
 
   const adapter = new SolanaAdapter();
   const modal = createAppKit({
@@ -83,11 +87,15 @@ async function main(): Promise<void> {
     },
   });
 
-  // Clear AppKit's internal state too (belt-and-suspenders against session restore)
-  await modal.disconnect().catch(() => {});
+  if (logout) {
+    await modal.disconnect().catch(() => {});
+    statusEl.textContent = "Signed out — closing…";
+    setTimeout(() => window.close(), 1_200);
+    return;
+  }
 
   // Show confirm section whenever a wallet connects — user must click to confirm.
-  // This prevents auto-restored sessions from silently sending to the extension.
+  // This prevents restored sessions from silently sending to the extension.
   modal.subscribeAccount((account) => {
     if (account.status === "connected" && account.address) {
       showConfirm(account.address);
