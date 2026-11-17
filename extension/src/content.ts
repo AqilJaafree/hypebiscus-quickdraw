@@ -58,7 +58,20 @@ function dismissActivePopup(): void {
   if (address) dismissGuard.dismiss(address, selectionText());
 }
 
+// After the extension is reloaded or updated, scripts already injected into
+// open tabs keep running but can no longer reach the background
+// ("Extension context invalidated"). Such an orphan must stay silent;
+// the fresh script loads when the tab is refreshed.
+function extensionAlive(): boolean {
+  try { return Boolean(chrome.runtime?.id); } catch { return false; }
+}
+
+function isContextInvalidated(msg: string): boolean {
+  return /context invalidated/i.test(msg);
+}
+
 async function triggerAddress(address: string, rawX: number, rawY: number, sourceEl?: Element, source: "selection" | "mutation" = "mutation"): Promise<void> {
+  if (!extensionAlive()) { closeActivePopup(); return; }
   if (!detectionEnabled) return;
   if (currentSiteMode === "off") return;
   if (currentSiteMode === "selection" && source !== "selection") return;
@@ -128,6 +141,7 @@ async function triggerAddress(address: string, rawX: number, rawY: number, sourc
     if (passive) return; // wallet / tx / non-token base58 — stay quiet
     const msg = fetchResult.reason instanceof Error ? fetchResult.reason.message : "";
     if (msg === "dedup") { removePopup(); activeController = null; return; }
+    if (isContextInvalidated(msg) || !extensionAlive()) { closeActivePopup(); return; }
     controller?.showError(msg || "Token not found");
     return;
   }
