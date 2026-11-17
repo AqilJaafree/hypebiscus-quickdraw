@@ -2,7 +2,7 @@
  * Quickdraw Cloudflare Worker
  *
  * Acts as a secure proxy for all external APIs — Anthropic, Jupiter, RugCheck,
- * Helius, AssemblyAI. The Rust binary never holds API keys; all secrets live here.
+ * Alchemy, AssemblyAI. The Rust binary never holds API keys; all secrets live here.
  *
  * Authentication: every request from the binary carries an HMAC-SHA256 signature
  * computed from (timestamp + path) using the shared APP_SECRET.
@@ -19,11 +19,12 @@
  *   POST /defi/jupiter/swap          → Jupiter swap/v1 /swap (builds the quote when given mints)
  *   GET  /defi/jupiter/price         → Jupiter price/v3, returned in the v2 `{ data }` shape
  *   GET  /defi/safety/rugcheck       → RugCheck report proxy
- *   GET  /defi/helius/token          → Helius DAS token metadata
- *   GET  /defi/helius/portfolio      → Helius DAS fungible token holdings
+ *   GET  /defi/token                 → Alchemy DAS token metadata (alias /defi/helius/token)
+ *   GET  /defi/portfolio             → Alchemy RPC balances + Jupiter prices (alias /defi/helius/portfolio)
  *   POST /ai/signals                 → Jev Router (OpenRouter) context signals for a detected address
  */
 
+import { getPortfolio, alchemySolanaUrl, RpcError } from "./portfolio";
 import { fetchSignals, parseSignalsRequest } from "./jev";
 import { buildNarrationBody, parseNarrationRequest } from "./narration";
 
@@ -31,7 +32,7 @@ export interface Env {
   ANTHROPIC_API_KEY: string;
   APP_SECRET: string;
   EXTENSION_SECRET: string;
-  HELIUS_API_KEY: string;
+  ALCHEMY_API_KEY: string;
   ASSEMBLYAI_API_KEY: string;
   REOWN_PROJECT_ID: string;
   OPENROUTER_API_KEY?: string;
@@ -355,87 +356,34 @@ async function handleRugcheck(url: URL): Promise<Response> {
   return json(data);
 }
 
-async function handleHeliusToken(url: URL, env: Env): Promise<Response> {
+async function handleToken(url: URL, env: Env): Promise<Response> {
   const mint = url.searchParams.get("mint");
   if (!mint) return err("mint param required");
+  if (!BASE58_ADDR.test(mint)) return err("valid mint param required");
 
-  const upstream = await fetch(
-    `https://mainnet.helius-rpc.com/?api-key=${env.HELIUS_API_KEY}`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        jsonrpc: "2.0",
-        id: 1,
-        method: "getAsset",
-        params: { id: mint },
-      }),
-    },
-  );
+  const upstream = await fetch(alchemySolanaUrl(env.ALCHEMY_API_KEY), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "getAsset", params: { id: mint } }),
+  });
   const data = await upstream.json();
   return json(data, upstream.status);
 }
 
-async function handleHeliusPortfolio(url: URL, env: Env): Promise<Response> {
+async function handlePortfolio(url: URL, env: Env): Promise<Response> {
   const wallet = url.searchParams.get("wallet");
   if (!wallet) return err("wallet param required");
-  if (!/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(wallet)) {
-    return err("valid wallet param required");
+  if (!BASE58_ADDR.test(wallet)) return err("valid wallet param required");
+  if (!env.ALCHEMY_API_KEY) return err("ALCHEMY_API_KEY not configured", 500);
+
+  try {
+    return json(await getPortfolio(wallet, alchemySolanaUrl(env.ALCHEMY_API_KEY)));
+  } catch (e) {
+    // RpcError messages carry method + status/code, never the key.
+    const detail = e instanceof RpcError ? e.message : "upstream failure";
+    console.error("portfolio:", detail);
+    return err(`Portfolio unavailable (${detail})`, 502);
   }
-
-  const upstream = await fetch(
-    `https://mainnet.helius-rpc.com/?api-key=${env.HELIUS_API_KEY}`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        jsonrpc: "2.0",
-        id: "portfolio",
-        method: "getAssetsByOwner",
-        params: {
-          ownerAddress: wallet,
-          page: 1,
-          limit: 100,
-          displayOptions: { showFungible: true, showNativeBalance: false },
-        },
-      }),
-    },
-  );
-
-  if (!upstream.ok) return err("Helius error", 502);
-
-  const raw = await upstream.json() as {
-    result?: {
-      items?: Array<{
-        id: string;
-        interface: string;
-        content: { metadata: { symbol?: string } };
-        token_info?: {
-          balance: number;
-          decimals: number;
-          price_info?: { price_per_token?: number };
-        };
-      }>;
-    };
-  };
-
-  const items = (raw.result?.items ?? [])
-    .filter(a => a.interface === "FungibleToken" && a.token_info)
-    .map(a => {
-      const ti = a.token_info!;
-      const priceUsd = ti.price_info?.price_per_token ?? null;
-      const balance = ti.balance / Math.pow(10, ti.decimals);
-      return {
-        mint: a.id,
-        symbol: a.content.metadata.symbol ?? a.id.slice(0, 6),
-        balance,
-        decimals: ti.decimals,
-        priceUsd,
-        valueUsd: priceUsd !== null ? balance * priceUsd : null,
-      };
-    });
-
-  return json(items);
 }
 
 async function handleAiSignals(req: Request, env: Env): Promise<Response> {
@@ -649,8 +597,9 @@ export default {
       if (url.pathname === "/defi/jupiter/price") {
         return handleJupiterPrice(url);
       }
-      if (url.pathname === "/defi/helius/portfolio") {
-        return handleHeliusPortfolio(url, env);
+      // /defi/helius/portfolio: alias kept for extension builds ≤ v0.1.1.
+      if (url.pathname === "/defi/portfolio" || url.pathname === "/defi/helius/portfolio") {
+        return handlePortfolio(url, env);
       }
       if (url.pathname === "/defi/jupiter/swap" && req.method === "POST") {
         return handleJupiterSwap(req);
@@ -682,7 +631,7 @@ export default {
     if (path === "/defi/jupiter/swap" && method === "POST") return handleJupiterSwap(req);
     if (path === "/defi/jupiter/price"        ) return handleJupiterPrice(url);
     if (path === "/defi/safety/rugcheck"      ) return handleRugcheck(url);
-    if (path === "/defi/helius/token"         ) return handleHeliusToken(url, env);
+    if (path === "/defi/token" || path === "/defi/helius/token") return handleToken(url, env);
 
     return err("Not found", 404);
   },

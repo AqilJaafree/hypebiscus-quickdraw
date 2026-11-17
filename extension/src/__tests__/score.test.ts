@@ -11,9 +11,9 @@ describe("scoreLabel", () => {
 });
 
 describe("scoreColor", () => {
-  it("returns lime for 80+", () => expect(scoreColor(80)).toBe("#8BF542"));
-  it("returns amber for 50-79", () => expect(scoreColor(50)).toBe("#F5C842"));
-  it("returns red for 0-49", () => expect(scoreColor(0)).toBe("#F54242"));
+  it("returns lime for 80+", () => expect(scoreColor(80)).toBe("#4CC38A"));
+  it("returns amber for 50-79", () => expect(scoreColor(50)).toBe("#F59A3C"));
+  it("returns red for 0-49", () => expect(scoreColor(0)).toBe("#E5484D"));
 });
 
 describe("computeSafetyScore", () => {

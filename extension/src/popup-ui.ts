@@ -1,7 +1,7 @@
 import type { SafetyScore, TokenPrice, WalletState, PortfolioItem } from "./types";
-import { DS, safetyColor } from "./styles";
+import { DS, ICON, safetyColor, sentenceCase, fmtUsd, ensureFonts } from "./styles";
 import { sendBg } from "./shared";
-import { buildTradePanel } from "./skills/trade";
+import { buildTradePanel, SOL_MINT } from "./skills/trade";
 import type { SignalFlag } from "./jev-signals";
 
 const HOST_ID = "quickdraw-host";
@@ -21,6 +21,7 @@ export interface PopupOptions {
 
 export function createPopup(opts: PopupOptions): PopupController {
   removePopup();
+  ensureFonts();
 
   const host = document.createElement("div");
   host.id = HOST_ID;
@@ -59,11 +60,17 @@ export function createPopup(opts: PopupOptions): PopupController {
     copyEl.addEventListener("click", () => {
       navigator.clipboard.writeText(opts.address).then(() => {
         const span = copyEl.querySelector("span");
+        const icon = copyEl.querySelector<HTMLElement>(".qd-copy-icon");
         if (!span) return;
         const prev = span.textContent;
-        span.textContent = "COPIED!";
-        copyEl.style.color = DS.safe;
-        setTimeout(() => { span.textContent = prev; copyEl.style.color = ""; }, 1000);
+        span.textContent = "Copied";
+        if (icon) icon.innerHTML = ICON.check;
+        copyEl.classList.add("copied");
+        setTimeout(() => {
+          span.textContent = prev;
+          if (icon) icon.innerHTML = ICON.copy;
+          copyEl.classList.remove("copied");
+        }, 1000);
       }).catch(() => {});
     });
   }
@@ -102,24 +109,27 @@ export class PopupController {
     if (scoreEl) scoreEl.textContent = String(safety.score);
 
     const labelEl = this.shadow.getElementById("qd-score-label");
-    if (labelEl) labelEl.textContent = safety.label;
+    if (labelEl) labelEl.textContent = sentenceCase(safety.label);
 
     const tickerEl = this.shadow.getElementById("qd-ticker");
     if (tickerEl) tickerEl.textContent = price?.symbol ?? this.opts.address.slice(0, 6) + "…";
 
+    // Buy is the brand action; it no longer borrows the safety color.
     const buyBtn = this.shadow.getElementById("qd-buy") as HTMLButtonElement | null;
-    if (buyBtn) { buyBtn.style.background = bg; buyBtn.style.color = fg; }
+    if (buyBtn) buyBtn.classList.add("ready");
 
     if (price) {
       const priceEl = this.shadow.getElementById("qd-price");
-      if (priceEl) priceEl.textContent = `$${price.usd < 0.01 ? price.usd.toFixed(6) : price.usd.toFixed(4)}`;
+      if (priceEl) priceEl.textContent = fmtUsd(price.usd);
 
-      const dir = price.change24h >= 0 ? "▲" : "▼";
+      const up = price.change24h >= 0;
       const changeEl = this.shadow.getElementById("qd-change");
       if (changeEl) {
-        changeEl.textContent = `${dir} ${Math.abs(price.change24h).toFixed(1)}%`;
-        changeEl.style.color = price.change24h >= 0 ? "#8BF542" : "#F54242";
+        changeEl.textContent = `${up ? "+" : "−"}${Math.abs(price.change24h).toFixed(1)}%`;
+        changeEl.style.color = up ? DS.safe : DS.danger;
       }
+      const periodEl = this.shadow.getElementById("qd-change-period");
+      if (periodEl) periodEl.textContent = "24h";
     }
   }
 
@@ -130,7 +140,7 @@ export class PopupController {
     for (const f of flags) {
       const chip = document.createElement("span");
       chip.className = `qd-chip qd-chip-${f.severity}`;
-      chip.textContent = f.label;
+      chip.textContent = sentenceCase(f.label);
       el.appendChild(chip);
     }
     el.style.display = "flex";
@@ -154,15 +164,18 @@ export class PopupController {
     this.isTrading = true;
     // Look up held balance for this token
     let heldBalance = 0;
+    let solBalance: number | null = null;
     if (wallet.connected) {
       try {
         const portfolio = await sendBg<PortfolioItem[]>({ type: "get_portfolio" });
         const item = portfolio.find(p => p.mint === outputMint);
         if (item) heldBalance = item.balance;
-      } catch { /* portfolio unavailable — sell tab hidden */ }
+        const sol = portfolio.find(p => p.mint === SOL_MINT);
+        solBalance = sol ? sol.balance : 0;
+      } catch { /* portfolio unavailable — sell tab and Max hidden */ }
     }
 
-    const tradeEl = buildTradePanel(outputMint, ticker, wallet, heldBalance);
+    const tradeEl = buildTradePanel(outputMint, ticker, wallet, heldBalance, solBalance);
 
     // Replace the actions bar with the trade panel inside the shadow root
     const actionsEl = this.shadow.getElementById("qd-actions-wrap");
@@ -182,69 +195,83 @@ function buildShell(address: string): string {
   return `
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
-  :host { font-family: ${DS.font}; font-size: 12px; }
-  .popup { width: 260px; background: ${DS.bg}; border: 2px solid #333; box-shadow: 3px 3px 0 #333; overflow: hidden; }
-  #qd-header { padding: 12px 10px; display: flex; align-items: center; gap: 10px;
-    background: #222; color: #555; transition: background 0.15s, color 0.15s; }
-  #qd-score { font-size: 34px; font-weight: 700; line-height: 1; min-width: 44px; }
-  .header-meta { flex: 1; }
-  #qd-score-label { font-size: 9px; font-weight: 700; letter-spacing: 0.08em; }
-  #qd-ticker { font-size: 17px; font-weight: 700; line-height: 1.2; margin-top: 1px; }
-  .header-btns { display: flex; gap: 6px; }
-  .qd-hdr-btn { background: none; border: none; cursor: pointer; font-size: 13px;
-    color: inherit; padding: 2px; line-height: 1; font-family: Inter, sans-serif; opacity: 0.7; }
+  :host { font-family: ${DS.font}; font-size: 12px; line-height: 16px; color: ${DS.text};
+    font-variant-numeric: tabular-nums; }
+  button { font: inherit; }
+  button:focus-visible { outline: 2px solid ${DS.yellow}; outline-offset: -2px; }
+  svg { display: block; }
+  .popup { width: 260px; background: ${DS.bg}; border: 2px solid #000; box-shadow: ${DS.shadow};
+    overflow: hidden; animation: qd-in 240ms ${DS.ease}; }
+  @keyframes qd-in { from { opacity: 0; transform: translateY(6px); } }
+
+  #qd-header { height: 64px; padding: 0 12px 0 16px; display: flex; align-items: center; gap: 12px;
+    background: ${DS.raised}; color: ${DS.textMut};
+    transition: background-color 200ms ${DS.ease}, color 200ms ${DS.ease}; }
+  #qd-score { font-size: 32px; font-weight: 700; line-height: 32px; letter-spacing: -0.02em; min-width: 40px; }
+  .header-meta { flex: 1; min-width: 0; }
+  #qd-score-label { font-size: 12px; line-height: 16px; }
+  #qd-ticker { font-size: 16px; font-weight: 700; line-height: 20px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .header-btns { display: flex; }
+  .qd-hdr-btn { display: grid; place-items: center; width: 28px; height: 28px; background: none;
+    border: none; cursor: pointer; color: inherit; opacity: 0.7; transition: opacity 150ms ${DS.ease}; }
   .qd-hdr-btn:hover { opacity: 1; }
-  .qd-addr { padding: 4px 12px; font-size: 10px; color: #444; letter-spacing: 0.04em;
-    cursor: pointer; display: flex; align-items: center; gap: 4px; user-select: none; }
-  .qd-addr:hover { color: #666; }
-  .qd-copy-icon { opacity: 0; font-size: 9px; }
-  .qd-addr:hover .qd-copy-icon { opacity: 1; }
-  .qd-price-row { padding: 8px 12px 4px; display: flex; align-items: center; gap: 10px; }
-  #qd-price { font-size: 13px; color: #fff; font-weight: 700; }
-  #qd-change { font-size: 12px; font-weight: 700; }
-  #qd-signals { display: none; flex-wrap: wrap; gap: 4px; padding: 2px 12px 6px; }
-  .qd-chip { font-size: 9px; font-weight: 700; letter-spacing: 0.06em; padding: 2px 5px; border: 1px solid; }
+
+  .qd-body { padding: 12px 16px; display: flex; flex-direction: column; gap: 8px; }
+  .qd-addr { align-self: flex-start; display: flex; align-items: center; gap: 4px; color: ${DS.textMut};
+    background: none; border: none; padding: 0; cursor: pointer; user-select: none;
+    transition: color 150ms ${DS.ease}; }
+  .qd-addr:hover, .qd-addr.copied { color: ${DS.textSec}; }
+  .qd-addr.copied .qd-copy-icon { color: ${DS.safe}; }
+  .qd-price-row { display: flex; align-items: baseline; gap: 8px; }
+  .qd-price-row:has(#qd-price:empty) { display: none; }
+  #qd-price { font-size: 14px; line-height: 20px; font-weight: 700; }
+  #qd-change-period { color: ${DS.textMut}; }
+
+  #qd-signals { display: none; flex-wrap: wrap; gap: 4px; }
+  .qd-chip { font-size: 11px; line-height: 14px; padding: 2px 6px; border: 1px solid; }
   .qd-chip-risk { color: ${DS.danger}; border-color: ${DS.danger}; }
   .qd-chip-caution { color: ${DS.caution}; border-color: ${DS.caution}; }
-  .qd-chip-info { color: #888; border-color: #444; }
-  #qd-narration { display: none; padding: 6px 12px 8px; font-size: 10px; color: #666;
-    line-height: 1.5; font-style: italic; border-top: 1px solid #1e1e1e; }
-  .qd-sep { height: 1px; background: #1e1e1e; }
-  .qd-actions { display: flex; height: 34px; }
-  #qd-buy { flex: 1; background: #2a2a2a; color: #555; font-family: ${DS.font}; font-size: 11px;
-    font-weight: 700; letter-spacing: 0.06em; cursor: pointer; border: none;
-    transition: background 0.15s, color 0.15s; }
-  #qd-buy:hover { filter: brightness(1.1); }
-  .qd-act-div { width: 1px; background: #111; flex-shrink: 0; }
-  #qd-cancel { flex: 1; background: #1a1a1a; color: #fff; font-family: ${DS.font}; font-size: 11px;
-    font-weight: 700; letter-spacing: 0.06em; cursor: pointer; border: none; }
-  #qd-cancel:hover { background: #222; }
+  .qd-chip-info { color: ${DS.textSec}; border-color: ${DS.hairlineStrong}; }
+
+  #qd-narration { display: none; padding: 12px 16px; color: ${DS.textSec}; line-height: 18px;
+    border-top: 1px solid ${DS.hairline}; }
+
+  .qd-actions { display: flex; height: 40px; border-top: 1px solid ${DS.hairline}; }
+  .qd-actions button { flex: 1; border: none; cursor: pointer; font-size: 13px;
+    transition: background-color 150ms ${DS.ease}, color 150ms ${DS.ease}; }
+  #qd-buy { background: ${DS.raised}; color: ${DS.textMut}; font-weight: 700; }
+  #qd-buy.ready { background: ${DS.yellow}; color: #111; }
+  #qd-buy.ready:hover { background: #fff04f; }
+  #qd-cancel { background: ${DS.bg}; color: ${DS.textSec}; border-left: 1px solid ${DS.hairline}; }
+  #qd-cancel:hover { background: ${DS.raised}; color: ${DS.text}; }
 </style>
 <div class="popup">
   <div id="qd-header">
     <span id="qd-score">—</span>
     <div class="header-meta">
-      <div id="qd-score-label">FETCHING…</div>
-      <div id="qd-ticker">⚡ QUICKDRAW</div>
+      <div id="qd-score-label">Checking…</div>
+      <div id="qd-ticker">Quickdraw</div>
     </div>
     <div class="header-btns">
-      <button id="qd-gear" class="qd-hdr-btn" title="Settings">⚙</button>
-      <button id="qd-close" class="qd-hdr-btn" title="Dismiss">✕</button>
+      <button id="qd-gear" class="qd-hdr-btn" title="Settings" aria-label="Settings">${ICON.settings}</button>
+      <button id="qd-close" class="qd-hdr-btn" title="Dismiss" aria-label="Dismiss">${ICON.x}</button>
     </div>
   </div>
-  <div id="qd-copy" class="qd-addr"><span>${short}</span><span class="qd-copy-icon">⧉</span></div>
-  <div class="qd-price-row">
-    <span id="qd-price"></span>
-    <span id="qd-change"></span>
+  <div class="qd-body">
+    <button id="qd-copy" class="qd-addr" title="Copy address"><span>${short}</span><span class="qd-copy-icon">${ICON.copy}</span></button>
+    <div class="qd-price-row">
+      <span id="qd-price"></span>
+      <span id="qd-change"></span>
+      <span id="qd-change-period"></span>
+    </div>
+    <div id="qd-signals"></div>
   </div>
-  <div id="qd-signals"></div>
   <div id="qd-narration"></div>
-  <div class="qd-sep"></div>
   <div id="qd-actions-wrap">
     <div class="qd-actions">
-      <button id="qd-buy">BUY</button>
-      <div class="qd-act-div"></div>
-      <button id="qd-cancel">CANCEL</button>
+      <button id="qd-buy">Buy</button>
+      <button id="qd-cancel">Cancel</button>
     </div>
   </div>
 </div>`;

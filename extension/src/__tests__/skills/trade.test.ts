@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect } from "vitest";
-import { formatSolAmount, parseOutputAmount, buildTradeHTML, buildTradePanel } from "../../skills/trade";
+import { formatSolAmount, parseOutputAmount, buildTradeHTML, buildTradePanel, maxSpendableSol } from "../../skills/trade";
 import type { WalletState } from "../../types";
 
 describe("formatSolAmount()", () => {
@@ -48,20 +48,19 @@ describe("buildTradeHTML()", () => {
     sellQuote: null,
   };
 
-  it("shows SWAP NOW (no arrow) when wallet is connected and not signing", () => {
+  it("shows Buy <ticker> when wallet is connected and not signing", () => {
     const html = buildTradeHTML("BONK", baseState, connectedWallet, 0);
-    expect(html).toContain("SWAP NOW");
-    expect(html).not.toContain("SWAP NOW ↗");
+    expect(html).toContain("Buy BONK");
   });
 
-  it("shows CONNECT WALLET FIRST when wallet is disconnected", () => {
+  it("asks to connect a wallet when disconnected", () => {
     const html = buildTradeHTML("BONK", baseState, disconnectedWallet, 0);
-    expect(html).toContain("CONNECT WALLET FIRST");
+    expect(html).toContain("Connect wallet to buy");
   });
 
-  it("shows SIGNING… and button is disabled when signing: true", () => {
+  it("shows Confirm in wallet… and button is disabled when signing: true", () => {
     const html = buildTradeHTML("BONK", { ...baseState, signing: true }, connectedWallet, 0);
-    expect(html).toContain("SIGNING…");
+    expect(html).toContain("Confirm in wallet…");
     expect(html).toContain("disabled");
   });
 
@@ -76,9 +75,9 @@ describe("buildTradeHTML()", () => {
       ...baseState,
       signSuccess: "https://solscan.io/tx/abc123",
     }, connectedWallet, 0);
-    expect(html).toContain("Swap sent!");
+    expect(html).toContain("Swap sent");
     expect(html).toContain("https://solscan.io/tx/abc123");
-    expect(html).toContain("View on Solscan ↗");
+    expect(html).toContain("View on Solscan");
   });
 
   it("shows error message on signError", () => {
@@ -86,7 +85,7 @@ describe("buildTradeHTML()", () => {
       ...baseState,
       signError: "User rejected",
     }, connectedWallet, 0);
-    expect(html).toContain("⚠");
+    expect(html).toContain("qd-tr-err");
     expect(html).toContain("User rejected");
   });
 });
@@ -111,6 +110,37 @@ describe("sell panel", () => {
     const sellTab = panel.querySelector<HTMLButtonElement>("#qd-tab-sell");
     sellTab?.click();
     expect(panel.innerHTML).toContain("1234.5678");
+    document.body.removeChild(panel);
+  });
+});
+
+describe("buy Max", () => {
+  const wallet: WalletState = { address: "WALLET111", adapter: "injected", connected: true };
+
+  it("maxSpendableSol keeps the fee reserve and floors to 4 decimals", () => {
+    expect(maxSpendableSol(2.345678)).toBe(2.3356);
+    expect(maxSpendableSol(0.01)).toBe(0);
+    expect(maxSpendableSol(0.005)).toBe(0);
+  });
+
+  it("hides Max when the SOL balance is unknown", () => {
+    const panel = buildTradePanel("TOKEN_MINT_111", "BONK", wallet, 0, null);
+    expect(panel.querySelector("#qd-trade-max")).toBeNull();
+  });
+
+  it("fills the input with balance minus the fee reserve, not a fixed 0.5", () => {
+    const panel = buildTradePanel("TOKEN_MINT_111", "BONK", wallet, 0, 3.25);
+    document.body.appendChild(panel);
+    panel.querySelector<HTMLButtonElement>("#qd-trade-max")?.click();
+    expect(panel.querySelector<HTMLInputElement>("#qd-trade-sol")?.value).toBe("3.24");
+    document.body.removeChild(panel);
+  });
+
+  it("shows an error instead of filling when the balance only covers fees", () => {
+    const panel = buildTradePanel("TOKEN_MINT_111", "BONK", wallet, 0, 0.008);
+    document.body.appendChild(panel);
+    panel.querySelector<HTMLButtonElement>("#qd-trade-max")?.click();
+    expect(panel.innerHTML).toContain("Not enough SOL");
     document.body.removeChild(panel);
   });
 });

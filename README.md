@@ -65,7 +65,7 @@ cp .env.example .env
 ```ini
 # .env
 WORKER_URL=https://your-worker.workers.dev   # Cloudflare Worker URL
-HELIUS_API_KEY=                               # helius.dev — RPC + DAS API
+ALCHEMY_API_KEY=                              # alchemy.com — Solana RPC + DAS
 ```
 
 > All third-party API keys (Jupiter, RugCheck, Anthropic) live in the Cloudflare Worker, never in the binary.
@@ -88,7 +88,7 @@ Set secrets in production:
 
 ```bash
 wrangler secret put ANTHROPIC_API_KEY
-wrangler secret put HELIUS_API_KEY
+wrangler secret put ALCHEMY_API_KEY
 wrangler secret put JUPITER_API_KEY
 ```
 

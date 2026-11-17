@@ -1,12 +1,24 @@
-import { DS, brutal } from "../styles";
+import { DS, ICON, brutal, fmtAmount } from "../styles";
 import { sendBg, esc } from "../shared";
 import type { MultiAdapterQuote, WalletState, SwapResult } from "../types";
 
-const SOL_MINT = "So11111111111111111111111111111111111111112";
+export const SOL_MINT = "So11111111111111111111111111111111111111112";
+/** SOL left in the wallet on Max, for network fees and new token-account rent. */
+export const SOL_FEE_RESERVE = 0.01;
 const LAMPORTS_PER_SOL = 1_000_000_000;
 
 export function formatSolAmount(sol: number): string {
   return sol.toFixed(4);
+}
+
+/**
+ * Largest SOL amount a buy can spend: balance minus the fee reserve,
+ * floored to 4 decimals so the input never rounds above the balance.
+ */
+export function maxSpendableSol(balance: number): number {
+  const spendable = balance - SOL_FEE_RESERVE;
+  if (!Number.isFinite(spendable) || spendable <= 0) return 0;
+  return Math.floor(spendable * 10_000) / 10_000;
 }
 
 export function parseOutputAmount(rawAmount: string, decimals: number): string {
@@ -37,9 +49,10 @@ export function buildTradePanel(
   ticker: string,
   wallet: WalletState,
   heldBalance: number = 0,
+  solBalance: number | null = null,
 ): HTMLElement {
   const el = document.createElement("div");
-  el.style.cssText = `padding:10px 12px;font-family:${DS.font};`;
+  el.style.cssText = `padding:12px 16px 16px;font-family:${DS.font};`;
 
   let state: TradeState = {
     solInput: "0.5",
@@ -55,7 +68,7 @@ export function buildTradePanel(
   };
 
   function render(): void {
-    el.innerHTML = buildTradeHTML(ticker, state, wallet, heldBalance);
+    el.innerHTML = buildTradeHTML(ticker, state, wallet, heldBalance, solBalance);
 
     // Buy tab events
     el.querySelector("#qd-tab-buy")?.addEventListener("click", () => {
@@ -78,7 +91,17 @@ export function buildTradePanel(
     });
 
     el.querySelector("#qd-trade-max")?.addEventListener("click", () => {
-      if (input) { input.value = "0.5"; state = { ...state, solInput: "0.5" }; fetchQuote(); }
+      if (!input || solBalance === null) return;
+      const max = maxSpendableSol(solBalance);
+      if (max <= 0) {
+        state = { ...state, error: `Not enough SOL — keep ${SOL_FEE_RESERVE} SOL for fees` };
+        render();
+        return;
+      }
+      const value = String(max);
+      input.value = value;
+      state = { ...state, solInput: value, multiQuote: null, error: null, signSuccess: null, signError: null };
+      void fetchQuote();
     });
 
     el.querySelector("#qd-trade-swap")?.addEventListener("click", () => {
@@ -199,135 +222,135 @@ export function buildTradePanel(
   return el;
 }
 
-export function buildTradeHTML(ticker: string, state: TradeState, wallet: WalletState, heldBalance: number = 0): string {
+const TRADE_CSS = `
+<style>
+  .qd-tr { display:flex; flex-direction:column; gap:12px; }
+  .qd-tr-tabs { display:flex; border:1px solid ${DS.hairline}; padding:2px; gap:2px; }
+  .qd-tr-tab { flex:1; height:28px; border:none; cursor:pointer; background:none; color:${DS.textMut};
+    font-size:12px; transition:background-color 150ms ${DS.ease}, color 150ms ${DS.ease}; }
+  .qd-tr-tab:hover { color:${DS.textSec}; }
+  .qd-tr-tab.active { background:${DS.raised}; color:${DS.text}; }
+  .qd-tr-field { display:flex; flex-direction:column; gap:8px; }
+  .qd-tr-label { display:flex; justify-content:space-between; color:${DS.textMut}; }
+  .qd-tr-row { display:flex; align-items:center; height:40px; background:${DS.raised};
+    border:1px solid ${DS.hairline}; transition:border-color 150ms ${DS.ease}; }
+  .qd-tr-row:focus-within { border-color:${DS.yellow}; }
+  .qd-tr-input { flex:1; min-width:0; height:100%; background:none; border:none; outline:none;
+    color:${DS.text}; padding:0 12px; font-family:${DS.font}; font-size:14px; font-variant-numeric:tabular-nums; }
+  .qd-tr-input::-webkit-inner-spin-button { -webkit-appearance:none; }
+  .qd-tr-unit { color:${DS.textMut}; padding-right:8px; }
+  .qd-tr-max { height:24px; margin-right:8px; padding:0 8px; background:${DS.bg}; color:${DS.textSec};
+    border:1px solid ${DS.hairlineStrong}; font-size:11px; cursor:pointer;
+    transition:color 150ms ${DS.ease}, border-color 150ms ${DS.ease}; }
+  .qd-tr-max:hover { color:${DS.text}; border-color:${DS.textMut}; }
+  .qd-tr-quotes { display:flex; flex-direction:column; gap:4px; }
+  .qd-tr-quote { display:grid; grid-template-columns:64px 1fr auto; align-items:center; gap:8px;
+    height:32px; padding:0 8px; border:1px solid ${DS.hairline}; color:${DS.textSec}; }
+  .qd-tr-quote.qd-tr-head { height:16px; border:none; color:${DS.textMut}; font-size:11px; }
+  .qd-tr-quote.qd-tr-head .qd-tr-out { color:${DS.textMut}; }
+  .qd-tr-quote.best { background:${DS.raised}; border-color:${DS.hairlineStrong}; }
+  .qd-tr-route { color:${DS.textSec}; }
+  .qd-tr-quote.best .qd-tr-route { color:${DS.text}; }
+  .qd-tr-out { color:${DS.text}; text-align:right; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .qd-tr-impact { color:${DS.textMut}; font-size:11px; text-align:right; min-width:40px; }
+  .qd-tr-hint { color:${DS.textMut}; height:32px; display:flex; align-items:center; }
+  .qd-tr-err { color:${DS.danger}; line-height:18px; }
+  .qd-tr-ok { display:flex; align-items:center; gap:8px; color:${DS.safe}; }
+  .qd-tr-ok a { display:inline-flex; align-items:center; gap:4px; color:${DS.text}; text-decoration:none;
+    border-bottom:1px solid ${DS.hairlineStrong}; }
+  .qd-tr-ok a:hover { border-color:${DS.text}; }
+  .qd-tr-swap { width:100%; height:40px; ${brutal(DS.yellow)}; color:#111; font-size:13px; font-weight:700;
+    cursor:pointer; font-family:${DS.font};
+    transition:transform 120ms ${DS.ease}, box-shadow 120ms ${DS.ease}; }
+  .qd-tr-swap:active:not(:disabled) { transform:translate(2px,2px); box-shadow:1px 1px 0 #333; }
+  .qd-tr-swap:disabled { opacity:0.5; cursor:not-allowed; }
+</style>`;
+
+function quoteList(q: MultiAdapterQuote | null, loading: boolean, decimals: number, unit: string): string {
+  if (q) {
+    const head = `<div class="qd-tr-quote qd-tr-head"><span>Route</span><span class="qd-tr-out">${esc(unit)}</span><span class="qd-tr-impact">Impact</span></div>`;
+    return head + q.all.map((r, i) => `
+      <div class="qd-tr-quote${i === 0 ? " best" : ""}">
+        <span class="qd-tr-route">${esc(r.routeLabel)}</span>
+        <span class="qd-tr-out">${fmtAmount(Number(parseOutputAmount(r.outAmount, decimals)))}</span>
+        <span class="qd-tr-impact" title="Price impact">${r.priceImpactPct.toFixed(2)}%</span>
+      </div>`).join("");
+  }
+  return `<div class="qd-tr-hint">${loading ? "Fetching quotes…" : "Enter an amount to see quotes"}</div>`;
+}
+
+function statusLine(state: TradeState, verb: string): string {
+  if (state.signSuccess) {
+    return `<div class="qd-tr-ok">${ICON.check} ${verb} sent
+      <a href="${esc(state.signSuccess)}" target="_blank" rel="noopener">View on Solscan ${ICON.external}</a></div>`;
+  }
+  if (state.signError) return `<div class="qd-tr-err">${esc(state.signError)}</div>`;
+  return "";
+}
+
+export function buildTradeHTML(
+  ticker: string,
+  state: TradeState,
+  wallet: WalletState,
+  heldBalance: number = 0,
+  solBalance: number | null = null,
+): string {
   const showSell = heldBalance > 0;
 
-  const statusBlock = state.signSuccess
-    ? `<div style="font-size:10px;color:#8bf542;padding:6px 0;">
-        ✓ Sent! <a href="${esc(state.signSuccess)}" target="_blank"
-          style="color:#8bf542;">View on Solscan ↗</a>
-       </div>`
-    : state.signError
-    ? `<div class="qd-tr-err">⚠ ${esc(state.signError)}</div>`
-    : "";
-
   const tabBar = showSell ? `
-<div style="display:flex;gap:2px;margin-bottom:8px;">
-  <button id="qd-tab-buy" style="flex:1;padding:5px;font-size:10px;font-weight:700;
-    font-family:${DS.font};cursor:pointer;border:none;
-    background:${state.activeTab === "buy" ? DS.yellow : "#222"};
-    color:${state.activeTab === "buy" ? "#000" : "#888"};">BUY</button>
-  <button id="qd-tab-sell" style="flex:1;padding:5px;font-size:10px;font-weight:700;
-    font-family:${DS.font};cursor:pointer;border:none;
-    background:${state.activeTab === "sell" ? DS.yellow : "#222"};
-    color:${state.activeTab === "sell" ? "#000" : "#888"};">SELL</button>
+<div class="qd-tr-tabs" role="tablist">
+  <button id="qd-tab-buy" class="qd-tr-tab${state.activeTab === "buy" ? " active" : ""}" role="tab">Buy</button>
+  <button id="qd-tab-sell" class="qd-tr-tab${state.activeTab === "sell" ? " active" : ""}" role="tab">Sell</button>
 </div>` : "";
+
+  const errorLine = state.error ? `<div class="qd-tr-err">${esc(state.error)}</div>` : "";
 
   // Sell panel
   if (state.activeTab === "sell" && showSell) {
-    const sellQuoteRows = state.sellQuote
-      ? state.sellQuote.all.map((q, i) => `
-        <div style="display:flex;justify-content:space-between;align-items:center;
-          padding:5px 8px;background:${i === 0 ? "#1e2e1e" : "#111"};
-          border:1px solid ${i === 0 ? "#8bf542" : "#2a2a2a"};margin-bottom:3px;">
-          <span style="font-size:9px;color:${i === 0 ? "#8bf542" : "#888"};">
-            ${i === 0 ? "★ " : ""}${esc(q.routeLabel)}
-          </span>
-          <span style="font-size:11px;font-weight:700;color:#fff;">
-            ${parseOutputAmount(q.outAmount, 9)} SOL
-          </span>
-          <span style="font-size:9px;color:#555;">${q.priceImpactPct.toFixed(2)}%</span>
-        </div>`).join("")
-      : state.loading
-        ? `<div style="font-size:10px;color:#555;padding:8px;">fetching quotes…</div>`
-        : `<div style="font-size:10px;color:#555;padding:8px;">—</div>`;
+    const sellLabel = !wallet.connected ? "Connect wallet to sell"
+      : state.signing ? "Confirm in wallet…" : `Sell ${ticker}`;
 
-    const sellLabel = !wallet.connected ? "CONNECT WALLET FIRST"
-      : state.signing ? "SIGNING…" : "SELL NOW";
-
-    return `
-<style>
-  .qd-tr-label { font-size:10px; color:${DS.textMut}; margin-bottom:6px; letter-spacing:0.06em; }
-  .qd-tr-row { display:flex; gap:6px; margin-bottom:6px; }
-  .qd-tr-input { flex:1; background:#222; border:1.5px solid ${DS.yellow}; color:#fff;
-    padding:7px 10px; font-family:${DS.font}; font-size:12px; outline:none; min-width:0; }
-  .qd-tr-max { ${brutal(DS.yellow)}; color:#000; padding:6px 10px; font-size:10px;
-    font-family:${DS.font}; font-weight:700; cursor:pointer; border:none; white-space:nowrap; }
-  .qd-tr-err { font-size:10px; color:${DS.danger}; margin-bottom:6px; }
-  .qd-tr-swap { width:100%; ${brutal("#f54242")}; color:#fff; padding:9px; font-size:11px;
-    font-weight:700; letter-spacing:0.06em; cursor:pointer; font-family:${DS.font}; }
-  .qd-tr-swap:disabled { opacity:0.5; cursor:not-allowed; }
-</style>
+    return `${TRADE_CSS}
+<div class="qd-tr">
 ${tabBar}
-<div class="qd-tr-label">SELL ${esc(ticker)} — Balance: ${heldBalance.toFixed(4)}</div>
-<div class="qd-tr-row">
-  <input id="qd-sell-amount" class="qd-tr-input" type="number"
-    value="${esc(state.sellInput)}" min="0" step="0.01" />
-  <span style="color:${DS.textMut};font-size:10px;align-self:center;">${esc(ticker)}</span>
-  <button id="qd-sell-max" class="qd-tr-max">MAX</button>
+<div class="qd-tr-field">
+  <div class="qd-tr-label"><span>Amount</span><span>Balance ${fmtAmount(heldBalance)}</span></div>
+  <div class="qd-tr-row">
+    <input id="qd-sell-amount" class="qd-tr-input" type="number" aria-label="Amount of ${esc(ticker)} to sell"
+      value="${esc(state.sellInput)}" min="0" step="0.01" />
+    <span class="qd-tr-unit">${esc(ticker)}</span>
+    <button id="qd-sell-max" class="qd-tr-max">Max</button>
+  </div>
 </div>
-<div class="qd-tr-quotes">${sellQuoteRows}</div>
-${state.error ? `<div class="qd-tr-err">⚠ ${esc(state.error)}</div>` : ""}
-${statusBlock}
-<button id="qd-sell-btn" class="qd-tr-swap" ${state.signing ? "disabled" : ""}>${esc(sellLabel)}</button>`;
+<div class="qd-tr-quotes">${quoteList(state.sellQuote, state.loading, 9, "SOL")}</div>
+${errorLine}
+${statusLine(state, "Sell")}
+<button id="qd-sell-btn" class="qd-tr-swap" ${state.signing ? "disabled" : ""}>${esc(sellLabel)}</button>
+</div>`;
   }
 
   // Buy panel
-  const quoteRows = state.multiQuote
-    ? state.multiQuote.all.map((q, i) => `
-      <div style="display:flex;justify-content:space-between;align-items:center;
-        padding:5px 8px;background:${i === 0 ? "#1e2e1e" : "#111"};
-        border:1px solid ${i === 0 ? "#8bf542" : "#2a2a2a"};margin-bottom:3px;">
-        <span style="font-size:9px;color:${i === 0 ? "#8bf542" : "#888"};">
-          ${i === 0 ? "★ " : ""}${esc(q.routeLabel)}
-        </span>
-        <span style="font-size:11px;font-weight:700;color:#fff;">
-          ${parseOutputAmount(q.outAmount, 6)} ${esc(ticker)}
-        </span>
-        <span style="font-size:9px;color:#555;">${q.priceImpactPct.toFixed(2)}%</span>
-      </div>`).join("")
-    : (state.loading
-        ? `<div style="font-size:10px;color:#555;padding:8px;">fetching quotes…</div>`
-        : `<div style="font-size:10px;color:#555;padding:8px;">—</div>`);
-
   const swapLabel = !wallet.connected
-    ? "CONNECT WALLET FIRST"
+    ? "Connect wallet to buy"
     : state.signing
-    ? "SIGNING…"
-    : "SWAP NOW";
+    ? "Confirm in wallet…"
+    : `Buy ${ticker}`;
 
-  const buyStatusBlock = state.signSuccess
-    ? `<div style="font-size:10px;color:#8bf542;padding:6px 0;">
-        ✓ Swap sent! <a href="${esc(state.signSuccess)}" target="_blank"
-          style="color:#8bf542;">View on Solscan ↗</a>
-       </div>`
-    : state.signError
-    ? `<div class="qd-tr-err">⚠ ${esc(state.signError)}</div>`
-    : "";
-
-  return `
-<style>
-  .qd-tr-label { font-size:10px; color:${DS.textMut}; margin-bottom:6px; letter-spacing:0.06em; }
-  .qd-tr-row { display:flex; gap:6px; margin-bottom:6px; }
-  .qd-tr-input { flex:1; background:#222; border:1.5px solid ${DS.yellow}; color:#fff;
-    padding:7px 10px; font-family:${DS.font}; font-size:12px; outline:none; min-width:0; }
-  .qd-tr-max { ${brutal(DS.yellow)}; color:#000; padding:6px 10px; font-size:10px;
-    font-family:${DS.font}; font-weight:700; cursor:pointer; border:none; white-space:nowrap; }
-  .qd-tr-quotes { margin-bottom:6px; }
-  .qd-tr-err { font-size:10px; color:${DS.danger}; margin-bottom:6px; }
-  .qd-tr-swap { width:100%; ${brutal(DS.yellow)}; color:#000; padding:9px; font-size:11px;
-    font-weight:700; letter-spacing:0.06em; cursor:pointer; font-family:${DS.font}; }
-  .qd-tr-swap:disabled { opacity:0.5; cursor:not-allowed; }
-</style>
+  return `${TRADE_CSS}
+<div class="qd-tr">
 ${tabBar}
-<div class="qd-tr-label">BUY ${esc(ticker)}</div>
-<div class="qd-tr-row">
-  <input id="qd-trade-sol" class="qd-tr-input" type="number" value="${esc(state.solInput)}" placeholder="0.5" min="0.001" step="0.1" />
-  <span style="color:${DS.textMut};font-size:10px;align-self:center;">SOL</span>
-  <button id="qd-trade-max" class="qd-tr-max">MAX</button>
+<div class="qd-tr-field">
+  <div class="qd-tr-label"><span>You pay</span>${solBalance !== null ? `<span>Balance ${fmtAmount(solBalance)}</span>` : ""}</div>
+  <div class="qd-tr-row">
+    <input id="qd-trade-sol" class="qd-tr-input" type="number" aria-label="Amount of SOL to spend"
+      value="${esc(state.solInput)}" placeholder="0.5" min="0.001" step="0.1" />
+    <span class="qd-tr-unit">SOL</span>
+    ${solBalance !== null ? `<button id="qd-trade-max" class="qd-tr-max" title="Balance minus ${SOL_FEE_RESERVE} SOL for fees">Max</button>` : ""}
+  </div>
 </div>
-<div class="qd-tr-quotes">${quoteRows}</div>
-${state.error ? `<div class="qd-tr-err">⚠ ${esc(state.error)}</div>` : ""}
-${buyStatusBlock}
-<button id="qd-trade-swap" class="qd-tr-swap" ${state.signing ? "disabled" : ""}>${esc(swapLabel)}</button>`;
+<div class="qd-tr-quotes">${quoteList(state.multiQuote, state.loading, 6, ticker)}</div>
+${errorLine}
+${statusLine(state, "Swap")}
+<button id="qd-trade-swap" class="qd-tr-swap" ${state.signing ? "disabled" : ""}>${esc(swapLabel)}</button>
+</div>`;
 }
