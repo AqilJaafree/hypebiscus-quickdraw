@@ -232,10 +232,27 @@ export function installEmailFallback(router: RouterLike = RouterController as un
 // is enough to diagnose it. Never shows the email itself.
 
 export function installDebugPanel(router: RouterLike = RouterController as unknown as RouterLike, doc: Document = document): void {
+  // A column on the right edge so it never covers the dialog or its inputs.
+  const wrap = doc.createElement("div");
+  wrap.style.cssText = "position:fixed;top:8px;right:8px;bottom:8px;width:min(340px,34vw);z-index:2147483647;" +
+    "display:flex;flex-direction:column;background:#000;border:1px solid #333;font:11px/1.4 ui-monospace,monospace;color:#9f9";
+  const bar = doc.createElement("div");
+  bar.style.cssText = "display:flex;justify-content:space-between;align-items:center;padding:4px 8px;border-bottom:1px solid #333;color:#ededed";
+  bar.innerHTML = `<span>debug</span>`;
+  const toggle = doc.createElement("button");
+  toggle.textContent = "Hide";
+  toggle.style.cssText = "background:none;border:1px solid #444;color:#ededed;font:inherit;padding:2px 8px;cursor:pointer";
+  bar.appendChild(toggle);
   const panel = doc.createElement("pre");
-  panel.style.cssText = "position:fixed;left:8px;bottom:8px;right:8px;max-height:45vh;overflow:auto;z-index:2147483647;" +
-    "margin:0;padding:8px;background:#000;color:#9f9;font:11px/1.4 ui-monospace,monospace;border:1px solid #333;white-space:pre-wrap";
-  doc.body.appendChild(panel);
+  panel.style.cssText = "flex:1;margin:0;padding:8px;overflow:auto;white-space:pre-wrap;word-break:break-word";
+  wrap.append(bar, panel);
+  doc.body.appendChild(wrap);
+  toggle.addEventListener("click", () => {
+    const hidden = panel.style.display === "none";
+    panel.style.display = hidden ? "" : "none";
+    wrap.style.bottom = hidden ? "8px" : "auto";
+    toggle.textContent = hidden ? "Hide" : "Show";
+  });
   const errors: string[] = [];
   const push = (kind: string, msg: unknown): void => {
     const text = msg instanceof Error ? `${msg.name}: ${msg.message}` : String(msg);
@@ -268,7 +285,9 @@ export function installDebugPanel(router: RouterLike = RouterController as unkno
     const { view, data } = router.state;
     panel.textContent = [
       `quickdraw debug · AppKit 2.0.0`,
-      `view: ${view}   data.email: ${data?.email ? "present" : "MISSING"}   guard: email captured=${guardState.lastEmailCaptured} repairs=${guardState.repairs}`,
+      `view: ${view}`,
+      `data.email: ${data?.email ? "present" : "MISSING"}`,
+      `guard: email captured=${guardState.lastEmailCaptured} repairs=${guardState.repairs}`,
       `views: ${history.join(" → ")}`,
       viewElementLine(doc),
       `fallback: shown=${fallbackState.shown} submitted=${fallbackState.submitted}${fallbackState.lastError ? ` lastError=${fallbackState.lastError}` : ""}`,
