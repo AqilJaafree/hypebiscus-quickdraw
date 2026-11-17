@@ -2,6 +2,7 @@ import type { SafetyScore, TokenPrice, WalletState, PortfolioItem } from "./type
 import { DS, ICON, safetyColor, sentenceCase, fmtUsd, ensureFonts } from "./styles";
 import { sendBg } from "./shared";
 import { buildTradePanel, SOL_MINT } from "./skills/trade";
+import { buildAlertPanel } from "./skills/alert";
 import type { SignalFlag } from "./jev-signals";
 
 const HOST_ID = "quickdraw-host";
@@ -76,7 +77,11 @@ export function createPopup(opts: PopupOptions): PopupController {
   }
 
   host.style.pointerEvents = "auto";
-  return new PopupController(shadow, host, opts);
+  const controller = new PopupController(shadow, host, opts);
+  shadow.getElementById("qd-alert")?.addEventListener("click", () => controller.showAlertPanel());
+  shadow.getElementById("qd-watch")?.addEventListener("click", () => void controller.toggleWatch());
+  void controller.loadWatchState();
+  return controller;
 }
 
 export function removePopup(): void {
@@ -84,8 +89,11 @@ export function removePopup(): void {
 }
 
 export class PopupController {
-  /** True once the trade panel is open — don't auto-close mid-swap. */
+  /** True once the trade or alert panel is open — don't auto-close mid-task. */
   isTrading = false;
+  private price: number | null = null;
+  private ticker: string | null = null;
+  private watching = false;
 
   constructor(
     private shadow: ShadowRoot,
@@ -111,8 +119,12 @@ export class PopupController {
     const labelEl = this.shadow.getElementById("qd-score-label");
     if (labelEl) labelEl.textContent = sentenceCase(safety.label);
 
+    this.ticker = price?.symbol ?? null;
+    this.price = price?.usd ?? null;
     const tickerEl = this.shadow.getElementById("qd-ticker");
     if (tickerEl) tickerEl.textContent = price?.symbol ?? this.opts.address.slice(0, 6) + "…";
+    const alertBtn = this.shadow.getElementById("qd-alert") as HTMLButtonElement | null;
+    if (alertBtn) alertBtn.disabled = false;
 
     // Buy is the brand action; it no longer borrows the safety color.
     const buyBtn = this.shadow.getElementById("qd-buy") as HTMLButtonElement | null;
@@ -159,6 +171,47 @@ export class PopupController {
   }
 
   updateWallet(_wallet: WalletState): void {}
+
+  private tickerOrShort(): string {
+    return this.ticker ?? this.opts.address.slice(0, 6);
+  }
+
+  private renderWatch(): void {
+    const btn = this.shadow.getElementById("qd-watch");
+    if (!btn) return;
+    btn.innerHTML = this.watching ? ICON.bookmarkOn : ICON.bookmark;
+    btn.title = this.watching ? "Remove from watchlist" : "Add to watchlist";
+    btn.setAttribute("aria-pressed", String(this.watching));
+  }
+
+  async loadWatchState(): Promise<void> {
+    try {
+      const list = await sendBg<Array<{ mint: string }>>({ type: "list_watchlist" });
+      this.watching = list.some(w => w.mint === this.opts.address);
+      this.renderWatch();
+    } catch { /* watchlist unavailable — button stays as "add" */ }
+  }
+
+  async toggleWatch(): Promise<void> {
+    const next = !this.watching;
+    this.watching = next;
+    this.renderWatch();
+    try {
+      await sendBg(next
+        ? { type: "add_watch", mint: this.opts.address, ticker: this.tickerOrShort() }
+        : { type: "remove_watch", mint: this.opts.address });
+    } catch {
+      this.watching = !next;
+      this.renderWatch();
+    }
+  }
+
+  showAlertPanel(): void {
+    this.isTrading = true;
+    const panel = buildAlertPanel(this.opts.address, this.tickerOrShort(), this.price);
+    const wrap = this.shadow.getElementById("qd-actions-wrap");
+    if (wrap) { wrap.innerHTML = ""; wrap.appendChild(panel); }
+  }
 
   async showTradePanel(outputMint: string, ticker: string, wallet: WalletState): Promise<void> {
     this.isTrading = true;
@@ -243,8 +296,9 @@ function buildShell(address: string): string {
   #qd-buy { background: ${DS.raised}; color: ${DS.textMut}; font-weight: 700; }
   #qd-buy.ready { background: ${DS.yellow}; color: #111; }
   #qd-buy.ready:hover { background: #fff04f; }
-  #qd-cancel { background: ${DS.bg}; color: ${DS.textSec}; border-left: 1px solid ${DS.hairline}; }
-  #qd-cancel:hover { background: ${DS.raised}; color: ${DS.text}; }
+  #qd-alert, #qd-cancel { background: ${DS.bg}; color: ${DS.textSec}; border-left: 1px solid ${DS.hairline}; }
+  #qd-alert:hover:not(:disabled), #qd-cancel:hover { background: ${DS.raised}; color: ${DS.text}; }
+  #qd-alert:disabled { color: ${DS.textMut}; cursor: default; }
 </style>
 <div class="popup">
   <div id="qd-header">
@@ -254,6 +308,7 @@ function buildShell(address: string): string {
       <div id="qd-ticker">Quickdraw</div>
     </div>
     <div class="header-btns">
+      <button id="qd-watch" class="qd-hdr-btn" title="Add to watchlist" aria-label="Watchlist" aria-pressed="false">${ICON.bookmark}</button>
       <button id="qd-gear" class="qd-hdr-btn" title="Settings" aria-label="Settings">${ICON.settings}</button>
       <button id="qd-close" class="qd-hdr-btn" title="Dismiss" aria-label="Dismiss">${ICON.x}</button>
     </div>
@@ -271,6 +326,7 @@ function buildShell(address: string): string {
   <div id="qd-actions-wrap">
     <div class="qd-actions">
       <button id="qd-buy">Buy</button>
+      <button id="qd-alert" disabled>Alert</button>
       <button id="qd-cancel">Cancel</button>
     </div>
   </div>

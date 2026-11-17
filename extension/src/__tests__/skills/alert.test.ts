@@ -1,49 +1,41 @@
 import { describe, it, expect } from "vitest";
-import { alertShouldFire, alertShouldRearm } from "../../skills/alert";
-import type { PriceAlert } from "../../types";
+import { parseAlertPrice, suggestPrice, buildAlertHTML } from "../../skills/alert";
+import type { ServerAlert } from "../../types";
 
-describe("alertShouldFire()", () => {
-  it("fires ABOVE alert when current price exceeds threshold", () => {
-    const alert: PriceAlert = { mint: "abc", ticker: "SOL", condition: "ABOVE", price: 200, triggered: false };
-    expect(alertShouldFire(alert, 201)).toBe(true);
-  });
-  it("does not fire ABOVE alert when price is below threshold", () => {
-    const alert: PriceAlert = { mint: "abc", ticker: "SOL", condition: "ABOVE", price: 200, triggered: false };
-    expect(alertShouldFire(alert, 199)).toBe(false);
-  });
-  it("fires BELOW alert when current price drops below threshold", () => {
-    const alert: PriceAlert = { mint: "abc", ticker: "SOL", condition: "BELOW", price: 150, triggered: false };
-    expect(alertShouldFire(alert, 149)).toBe(true);
-  });
-  it("does not fire already-triggered alert", () => {
-    const alert: PriceAlert = { mint: "abc", ticker: "SOL", condition: "ABOVE", price: 200, triggered: true };
-    expect(alertShouldFire(alert, 250)).toBe(false);
-  });
-  it("does not fire ABOVE alert at exact threshold (strictly greater)", () => {
-    const alert: PriceAlert = { mint: "abc", ticker: "SOL", condition: "ABOVE", price: 200, triggered: false };
-    expect(alertShouldFire(alert, 200)).toBe(false);
-  });
-  it("does not fire BELOW alert at exact threshold (strictly less)", () => {
-    const alert: PriceAlert = { mint: "abc", ticker: "SOL", condition: "BELOW", price: 150, triggered: false };
-    expect(alertShouldFire(alert, 150)).toBe(false);
-  });
-});
+const base = { condition: "ABOVE" as const, priceInput: "0.46", saving: false, error: null, saved: false, existing: [] as ServerAlert[] };
 
-describe("alertShouldRearm()", () => {
-  it("re-arms ABOVE alert when price drops back below threshold", () => {
-    const alert: PriceAlert = { mint: "abc", ticker: "SOL", condition: "ABOVE", price: 200, triggered: true };
-    expect(alertShouldRearm(alert, 190)).toBe(true);
+describe("alert panel", () => {
+  it("parses typed prices, rejecting zero and junk", () => {
+    expect(parseAlertPrice("0.5")).toBe(0.5);
+    expect(parseAlertPrice("$1,250")).toBe(1250);
+    expect(parseAlertPrice("0")).toBeNull();
+    expect(parseAlertPrice("abc")).toBeNull();
   });
-  it("does not re-arm non-triggered alert", () => {
-    const alert: PriceAlert = { mint: "abc", ticker: "SOL", condition: "ABOVE", price: 200, triggered: false };
-    expect(alertShouldRearm(alert, 190)).toBe(false);
+
+  it("suggests a target 10% away from the current price", () => {
+    expect(suggestPrice(0.4187, "ABOVE")).toBe("0.4606");
+    expect(suggestPrice(0.4187, "BELOW")).toBe("0.3768");
+    expect(suggestPrice(null, "ABOVE")).toBe("");
   });
-  it("re-arms BELOW alert when price rises back above threshold", () => {
-    const alert: PriceAlert = { mint: "abc", ticker: "SOL", condition: "BELOW", price: 100, triggered: true };
-    expect(alertShouldRearm(alert, 110)).toBe(true);
+
+  it("shows the current price, the saved state and existing alerts", () => {
+    const html = buildAlertHTML("POPCAT", 0.4187, {
+      ...base, saved: true,
+      existing: [{ id: "a1", mint: "M", ticker: "POPCAT", condition: "BELOW", price: 0.3, triggered: true, lastPrice: 0.29, firedAt: null }],
+    });
+    expect(html).toContain("Target price");
+    expect(html).toContain("Now $0.4187");
+    expect(html).toContain("Alert set");
+    expect(html).toContain("Below <b>$0.30</b>");
+    expect(html).toContain("Fired");
+    expect(html).toContain('data-id="a1"');
   });
-  it("does not re-arm ABOVE alert when price is still above threshold", () => {
-    const alert: PriceAlert = { mint: "abc", ticker: "SOL", condition: "ABOVE", price: 200, triggered: true };
-    expect(alertShouldRearm(alert, 210)).toBe(false);
+
+  it("escapes the ticker", () => {
+    expect(buildAlertHTML("<img>", null, base)).not.toContain("<img>");
+  });
+
+  it("disables the button while saving", () => {
+    expect(buildAlertHTML("X", null, { ...base, saving: true })).toMatch(/id="qd-al-set"[^>]*disabled/);
   });
 });

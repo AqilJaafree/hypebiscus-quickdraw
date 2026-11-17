@@ -1,5 +1,8 @@
 import { fetchToken } from "./jupiter-client";
-import { alertShouldFire, alertShouldRearm } from "./skills/alert";
+import {
+  makeApi, listAlerts, createAlert, deleteAlert, listWatch, addWatch, removeWatch,
+  migrateLocalData, ensurePushSubscription, parsePushPayload,
+} from "./alerts-api";
 import { rankQuotes } from "./multi-quote-utils";
 import type {
   BgRequest, BgResponse, SafetyScore, TokenData, TokenPrice,
@@ -125,68 +128,56 @@ async function fetchRaydiumQuote(
   }
 }
 
-// ── Price alert polling ────────────────────────────────────────────────────────
-const ALERT_ALARM = "qd-alert-check";
+// ── Alerts, watchlist, Web Push (server-backed) ───────────────────────────────
+// Price alerts are checked by the Railway alert engine, which pushes a
+// notification when one crosses. Builds ≤ v0.1.1 polled here every 5 minutes.
+const LEGACY_ALERT_ALARM = "qd-alert-check";
+const api = makeApi({ workerUrl: WORKER_URL, secret: EXTENSION_SECRET });
 
-chrome.runtime.onInstalled.addListener(() => {
-  chrome.alarms.create(ALERT_ALARM, { periodInMinutes: 5 });
+interface PushEventLike extends Event { data: { text(): string } | null; waitUntil(p: Promise<unknown>): void }
+interface NotificationEventLike extends Event { notification: { data?: { mint?: string }; close(): void }; waitUntil(p: Promise<unknown>): void }
+interface SWGlobal {
+  registration: Parameters<typeof ensurePushSubscription>[1] & {
+    showNotification(title: string, opts: { body: string; icon: string; tag: string; data: unknown }): Promise<void>;
+  };
+  clients: { openWindow(url: string): Promise<unknown> };
+  addEventListener(type: "push", fn: (e: PushEventLike) => void): void;
+  addEventListener(type: "notificationclick", fn: (e: NotificationEventLike) => void): void;
+}
+const sw = self as unknown as SWGlobal;
+
+async function syncServerState(): Promise<void> {
+  await chrome.alarms.clear(LEGACY_ALERT_ALARM).catch(() => false);
+  try { await migrateLocalData(api); } catch (e) { console.warn("[qd] alert migration deferred:", e); }
+  try { await ensurePushSubscription(api, sw.registration); } catch (e) { console.warn("[qd] push subscribe failed:", e); }
+}
+
+chrome.runtime.onInstalled.addListener(() => { void syncServerState(); });
+chrome.runtime.onStartup.addListener(() => { void syncServerState(); });
+
+sw.addEventListener("push", (event) => {
+  const msg = parsePushPayload(event.data?.text());
+  if (!msg) return;
+  event.waitUntil(sw.registration.showNotification(msg.title, {
+    body: msg.body,
+    icon: "icons/icon128.png",
+    tag: `qd-alert-${msg.alertId || msg.mint}`,
+    data: { mint: msg.mint },
+  }));
+});
+
+sw.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  const mint = event.notification.data?.mint;
+  if (mint && /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(mint)) {
+    event.waitUntil(sw.clients.openWindow(`https://solscan.io/token/${mint}`));
+  }
 });
 
 // Track session start time (chrome.storage.session resets on browser close)
 chrome.storage.session.get("sessionStart").then(({ sessionStart }) => {
   if (!sessionStart) chrome.storage.session.set({ sessionStart: Date.now() });
 }).catch(() => {});
-
-chrome.alarms.onAlarm.addListener(async (alarm) => {
-  if (alarm.name !== ALERT_ALARM) return;
-
-  const { alerts } = await chrome.storage.local.get("alerts");
-  const alertList: PriceAlert[] = alerts ?? [];
-  if (!alertList.length) return;
-
-  const mints = [...new Set(alertList.map(a => a.mint))];
-  let updated = [...alertList];
-  let anyChanged = false;
-
-  for (const mint of mints) {
-    try {
-      const params = new URLSearchParams({ ids: mint });
-      const resp = await fetch(`${WORKER_URL}/defi/jupiter/price?${params}`, {
-        headers: {
-          "X-Quickdraw-Client": "extension",
-          "Authorization": `Bearer ${EXTENSION_SECRET}`,
-        },
-      });
-      if (!resp.ok) continue;
-      const data = await resp.json() as { data: Record<string, { price: number }> };
-      const currentPrice = data.data[mint]?.price;
-      if (currentPrice === undefined) continue;
-
-      updated = updated.map(a => {
-        if (a.mint !== mint) return a;
-        if (alertShouldFire(a, currentPrice)) {
-          chrome.notifications.create(`qd-alert-${a.mint}-${a.condition}`, {
-            type: "basic",
-            iconUrl: "icons/icon128.png",
-            title: "Quickdraw Alert",
-            message: `${a.ticker} is ${a.condition === "ABOVE" ? "above" : "below"} $${a.price} (now $${currentPrice.toFixed(6)})`,
-          });
-          anyChanged = true;
-          return { ...a, triggered: true };
-        }
-        if (alertShouldRearm(a, currentPrice)) {
-          anyChanged = true;
-          return { ...a, triggered: false };
-        }
-        return a;
-      });
-    } catch { /* network error — skip this mint */ }
-  }
-
-  if (anyChanged) {
-    await chrome.storage.local.set({ alerts: updated });
-  }
-});
 
 // ── AI narration port ─────────────────────────────────────────────────────────
 chrome.runtime.onConnect.addListener((port) => {
@@ -492,26 +483,38 @@ async function handleMessage(
       return;
     }
 
-    if (msg.type === "get_alerts") {
-      const { alerts } = await chrome.storage.local.get("alerts");
-      respond({ ok: true, data: (alerts ?? []) as PriceAlert[] });
+    if (msg.type === "list_alerts") {
+      respond({ ok: true, data: await listAlerts(api) });
       return;
     }
 
-    if (msg.type === "set_alerts") {
-      await chrome.storage.local.set({ alerts: msg.alerts });
+    if (msg.type === "create_alert") {
+      const alert = await createAlert(api, { mint: msg.mint, ticker: msg.ticker, condition: msg.condition, price: msg.price });
+      // Make sure this install can actually receive the notification.
+      void ensurePushSubscription(api, sw.registration).catch(() => {});
+      respond({ ok: true, data: alert });
+      return;
+    }
+
+    if (msg.type === "delete_alert") {
+      await deleteAlert(api, msg.id);
       respond({ ok: true, data: null });
       return;
     }
 
-    if (msg.type === "get_watchlist") {
-      const { watchlist } = await chrome.storage.local.get("watchlist");
-      respond({ ok: true, data: (watchlist ?? []) as WatchItem[] });
+    if (msg.type === "list_watchlist") {
+      respond({ ok: true, data: await listWatch(api) });
       return;
     }
 
-    if (msg.type === "set_watchlist") {
-      await chrome.storage.local.set({ watchlist: msg.watchlist });
+    if (msg.type === "add_watch") {
+      await addWatch(api, { mint: msg.mint, ticker: msg.ticker });
+      respond({ ok: true, data: null });
+      return;
+    }
+
+    if (msg.type === "remove_watch") {
+      await removeWatch(api, msg.mint);
       respond({ ok: true, data: null });
       return;
     }

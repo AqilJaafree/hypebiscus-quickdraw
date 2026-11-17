@@ -92,6 +92,23 @@
     .portfolio-val { color: var(--text); }
     .portfolio-empty { color: var(--text-mut); }
 
+    /* ── Alerts + watchlist ─────────────────────────────────────────────────── */
+    .list-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; height: 32px;
+      border-bottom: 1px solid var(--hairline); }
+    .list-row:last-child { border-bottom: none; }
+    .list-main { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+    .list-main b { font-weight: 400; color: var(--text); }
+    .list-main span { color: var(--text-sec); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .list-side { display: flex; align-items: center; gap: 8px; color: var(--text-sec); }
+    .list-tag { font-size: 11px; color: var(--text-mut); }
+    .up { color: var(--safe); } .down { color: var(--danger); }
+    .row-del { display: grid; place-items: center; width: 24px; height: 24px; margin-right: -4px; background: none;
+      border: none; color: var(--text-mut); cursor: pointer; transition: color 150ms var(--ease); }
+    .row-del:hover { color: var(--danger); }
+    .list-empty { color: var(--text-mut); padding: 4px 0; }
+    .list-error { color: var(--danger); padding: 4px 0; }
+    .hint { color: var(--text-mut); font-size: 11px; line-height: 16px; }
+
     /* ── Skills list ────────────────────────────────────────────────────────── */
     .skills { display: flex; flex-direction: column; }
     .skill-row { display: flex; justify-content: space-between; align-items: center; height: 40px;
@@ -128,6 +145,7 @@
 
   <div class="qd-tabs" role="tablist">
     <button class="qd-tab active" id="tab-state" role="tab">State</button>
+    <button class="qd-tab" id="tab-alerts" role="tab">Alerts</button>
     <button class="qd-tab" id="tab-skills" role="tab">Skills</button>
   </div>
 
@@ -177,6 +195,21 @@
         <div class="rows" id="portfolio-list"></div>
       </div>
 
+    </div>
+  </div>
+
+  <!-- Alerts pane -->
+  <div class="qd-pane" id="pane-alerts">
+    <div class="content">
+      <div class="section">
+        <div class="section-label">Price alerts</div>
+        <div class="rows" id="alerts-list"><div class="list-empty">Loading…</div></div>
+      </div>
+      <div class="section">
+        <div class="section-label">Watchlist</div>
+        <div class="rows" id="watch-list"><div class="list-empty">Loading…</div></div>
+      </div>
+      <p class="hint">Set an alert or watch a token from its card. Alerts are checked every 15 seconds and arrive as notifications, even with Chrome in the background.</p>
     </div>
   </div>
 

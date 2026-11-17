@@ -1,6 +1,6 @@
 import { sendBg, esc } from "./shared";
 import { fmtUsd } from "./styles";
-import type { WalletState, PortfolioItem, SkillSettings } from "./types";
+import type { WalletState, PortfolioItem, SkillSettings, ServerAlert, WatchItem, WatchItemWithPrice } from "./types";
 
 function formatDuration(ms: number): string {
   const s = Math.floor(ms / 1000);
@@ -47,24 +47,85 @@ async function loadPortfolio(wallet: WalletState): Promise<void> {
   }
 }
 
+const X_ICON = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>`;
+
+const errMsg = (e: unknown): string => (e instanceof Error ? e.message : "Couldn't load");
+
+async function loadAlertsPane(): Promise<void> {
+  const alertsEl = document.getElementById("alerts-list") as HTMLElement;
+  const watchEl = document.getElementById("watch-list") as HTMLElement;
+
+  const [alerts, watch] = await Promise.allSettled([
+    sendBg<ServerAlert[]>({ type: "list_alerts" }),
+    sendBg<WatchItem[]>({ type: "list_watchlist" }),
+  ]);
+
+  if (alerts.status === "rejected") {
+    alertsEl.innerHTML = `<div class="list-error">${esc(errMsg(alerts.reason))}</div>`;
+  } else if (!alerts.value.length) {
+    alertsEl.innerHTML = `<div class="list-empty">No alerts yet</div>`;
+  } else {
+    alertsEl.innerHTML = alerts.value.map(a => `
+      <div class="list-row">
+        <div class="list-main"><b>${esc(a.ticker)}</b><span>${a.condition === "ABOVE" ? "above" : "below"} ${fmtUsd(a.price)}</span></div>
+        <div class="list-side">
+          ${a.triggered ? `<span class="list-tag">Fired</span>` : a.lastPrice ? `<span class="list-tag">now ${fmtUsd(a.lastPrice)}</span>` : ""}
+          <button class="row-del" data-alert="${esc(a.id)}" aria-label="Remove alert for ${esc(a.ticker)}">${X_ICON}</button>
+        </div>
+      </div>`).join("");
+    alertsEl.querySelectorAll<HTMLButtonElement>("[data-alert]").forEach(b => b.addEventListener("click", async () => {
+      b.disabled = true;
+      try { await sendBg({ type: "delete_alert", id: b.dataset.alert ?? "" }); } catch { /* reload shows truth */ }
+      void loadAlertsPane();
+    }));
+  }
+
+  if (watch.status === "rejected") {
+    watchEl.innerHTML = `<div class="list-error">${esc(errMsg(watch.reason))}</div>`;
+    return;
+  }
+  if (!watch.value.length) {
+    watchEl.innerHTML = `<div class="list-empty">Nothing watched yet</div>`;
+    return;
+  }
+  let prices: WatchItemWithPrice[] = [];
+  try { prices = await sendBg<WatchItemWithPrice[]>({ type: "get_watchlist_prices", mints: watch.value.map(w => w.mint) }); }
+  catch { /* show the list without prices */ }
+  const byMint = new Map(prices.map(p => [p.mint, p]));
+  watchEl.innerHTML = watch.value.map(w => {
+    const p = byMint.get(w.mint);
+    const ch = p?.change24h ?? null;
+    return `
+      <div class="list-row">
+        <div class="list-main"><b>${esc(w.ticker)}</b><span>${p?.priceUsd != null ? fmtUsd(p.priceUsd) : "—"}</span></div>
+        <div class="list-side">
+          ${ch !== null ? `<span class="${ch >= 0 ? "up" : "down"}">${ch >= 0 ? "+" : "−"}${Math.abs(ch).toFixed(1)}%</span>` : ""}
+          <button class="row-del" data-watch="${esc(w.mint)}" aria-label="Stop watching ${esc(w.ticker)}">${X_ICON}</button>
+        </div>
+      </div>`;
+  }).join("");
+  watchEl.querySelectorAll<HTMLButtonElement>("[data-watch]").forEach(b => b.addEventListener("click", async () => {
+    b.disabled = true;
+    try { await sendBg({ type: "remove_watch", mint: b.dataset.watch ?? "" }); } catch { /* reload shows truth */ }
+    void loadAlertsPane();
+  }));
+}
+
 function init(): void {
   // ── Close ──────────────────────────────────────────────────────────────────
   document.getElementById("close-btn")?.addEventListener("click", () => window.close());
 
   // ── Tabs ───────────────────────────────────────────────────────────────────
-  const tabState   = document.getElementById("tab-state") as HTMLButtonElement;
-  const tabSkills  = document.getElementById("tab-skills") as HTMLButtonElement;
-  const paneState  = document.getElementById("pane-state") as HTMLElement;
-  const paneSkills = document.getElementById("pane-skills") as HTMLElement;
-
-  tabState.addEventListener("click", () => {
-    tabState.classList.add("active");   tabSkills.classList.remove("active");
-    paneState.classList.add("active");  paneSkills.classList.remove("active");
-  });
-  tabSkills.addEventListener("click", () => {
-    tabSkills.classList.add("active");  tabState.classList.remove("active");
-    paneSkills.classList.add("active"); paneState.classList.remove("active");
-  });
+  const TABS = ["state", "alerts", "skills"] as const;
+  function selectTab(name: typeof TABS[number]): void {
+    for (const t of TABS) {
+      document.getElementById(`tab-${t}`)?.classList.toggle("active", t === name);
+      document.getElementById(`tab-${t}`)?.setAttribute("aria-selected", String(t === name));
+      document.getElementById(`pane-${t}`)?.classList.toggle("active", t === name);
+    }
+    if (name === "alerts") void loadAlertsPane();
+  }
+  for (const t of TABS) document.getElementById(`tab-${t}`)?.addEventListener("click", () => selectTab(t));
 
   // ── Status ─────────────────────────────────────────────────────────────────
   const dot      = document.getElementById("status-dot") as HTMLElement;
