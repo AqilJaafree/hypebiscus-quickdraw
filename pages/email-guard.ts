@@ -26,21 +26,25 @@ export function needsRepair(view: string, data: { email?: string } | undefined):
   return (EMAIL_VIEWS as readonly string[]).includes(view) && !data?.email;
 }
 
+/** Read-only view of the guard for the ?debug=1 panel. */
+export const guardState = { lastEmailCaptured: false, repairs: 0 };
+
 export function installEmailGuard(router: RouterLike = RouterController as unknown as RouterLike, doc: Document = document): () => void {
   let lastEmail = "";
 
   const onInput = (e: Event): void => {
     const v = (e as CustomEvent<unknown>).detail;
-    if (typeof v === "string" && EMAIL.test(v.trim())) lastEmail = v.trim();
+    if (typeof v === "string" && EMAIL.test(v.trim())) { lastEmail = v.trim(); guardState.lastEmailCaptured = true; }
   };
   doc.addEventListener("inputChange", onInput, true);
 
   let repairing = false;
   const check = (): void => {
     const { view, data } = router.state;
-    if (data?.email && EMAIL.test(data.email)) lastEmail = data.email;
+    if (data?.email && EMAIL.test(data.email)) { lastEmail = data.email; guardState.lastEmailCaptured = true; }
     if (repairing || !needsRepair(view, data) || !lastEmail) return;
     repairing = true;
+    guardState.repairs++;
     // push() ignores data when the view is unchanged, so step off and back on.
     // The view element is rebuilt and reads the email from router data.
     queueMicrotask(() => {
@@ -57,4 +61,41 @@ export function installEmailGuard(router: RouterLike = RouterController as unkno
   const unsubData = router.subscribeKey("data", check);
   check();
   return () => { unsubView(); unsubData(); doc.removeEventListener("inputChange", onInput, true); };
+}
+
+// ── ?debug=1 panel ────────────────────────────────────────────────────────────
+// Shows what AppKit is doing when the email step misbehaves, so a screenshot
+// is enough to diagnose it. Never shows the email itself.
+
+export function installDebugPanel(router: RouterLike = RouterController as unknown as RouterLike, doc: Document = document): void {
+  const panel = doc.createElement("pre");
+  panel.style.cssText = "position:fixed;left:8px;bottom:8px;right:8px;max-height:45vh;overflow:auto;z-index:2147483647;" +
+    "margin:0;padding:8px;background:#000;color:#9f9;font:11px/1.4 ui-monospace,monospace;border:1px solid #333;white-space:pre-wrap";
+  doc.body.appendChild(panel);
+  const errors: string[] = [];
+  const push = (kind: string, msg: unknown): void => {
+    const text = msg instanceof Error ? `${msg.name}: ${msg.message}` : String(msg);
+    errors.push(`${new Date().toISOString().slice(11, 19)} ${kind}: ${text.replace(/[^\s@]+@[^\s@]+/g, "<email>").slice(0, 300)}`);
+    if (errors.length > 12) errors.shift();
+    render();
+  };
+  const origError = console.error.bind(console);
+  console.error = (...args: unknown[]) => { push("console", args.map(a => a instanceof Error ? a.message : typeof a === "object" ? JSON.stringify(a)?.slice(0, 200) : String(a)).join(" ")); origError(...args); };
+  addEventListener("error", (e) => push("error", (e as ErrorEvent).error ?? (e as ErrorEvent).message));
+  addEventListener("unhandledrejection", (e) => push("rejection", (e as PromiseRejectionEvent).reason));
+  const history: string[] = [];
+  function render(): void {
+    const { view, data } = router.state;
+    panel.textContent = [
+      `quickdraw debug · AppKit 1.8.21`,
+      `view: ${view}   data.email: ${data?.email ? "present" : "MISSING"}   guard: email captured=${guardState.lastEmailCaptured} repairs=${guardState.repairs}`,
+      `views: ${history.join(" → ")}`,
+      `errors:`,
+      ...(errors.length ? errors : ["  (none)"]),
+    ].join("\n");
+  }
+  router.subscribeKey("view", () => { history.push(router.state.view); if (history.length > 10) history.shift(); render(); });
+  router.subscribeKey("data", render);
+  history.push(router.state.view);
+  render();
 }
