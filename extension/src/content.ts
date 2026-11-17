@@ -7,6 +7,7 @@ import type { TweetContext } from "./tweet-context";
 import { getSiteMode, defaultMode } from "./detection-rules";
 import type { SiteMode } from "./detection-rules";
 import { deriveVerdict } from "./jev-signals";
+import { DismissGuard } from "./dismissal";
 import type { JevSignals, SignalVerdict } from "./jev-signals";
 
 function clampPosition(x: number, y: number): { x: number; y: number } {
@@ -37,11 +38,24 @@ const CONTENT_DEDUP_MS = 30_000;
 let epoch = 0;
 let narrationPort: chrome.runtime.Port | null = null;
 
+const dismissGuard = new DismissGuard();
+let activeAddress: string | null = null;
+
+const selectionText = (): string => window.getSelection()?.toString() ?? "";
+
 function closeActivePopup(): void {
   removePopup();
   activeController = null;
+  activeAddress = null;
   narrationPort?.disconnect(); // background aborts the upstream stream
   narrationPort = null;
+}
+
+/** The user closed the popup (Cancel, ✕, Escape, click outside). */
+function dismissActivePopup(): void {
+  const address = activeAddress;
+  closeActivePopup();
+  if (address) dismissGuard.dismiss(address, selectionText());
 }
 
 async function triggerAddress(address: string, rawX: number, rawY: number, sourceEl?: Element, source: "selection" | "mutation" = "mutation"): Promise<void> {
@@ -51,6 +65,8 @@ async function triggerAddress(address: string, rawX: number, rawY: number, sourc
 
   const passive = source === "mutation";
   if (passive && document.hidden) return;
+  // A dismissed address only comes back when the user selects it again.
+  if (passive && !dismissGuard.allowPassive(address)) return;
 
   // Dedup only scroll detections. A selection is deliberate: selecting the
   // same address again (or in another tab) must always show the popup.
@@ -80,7 +96,7 @@ async function triggerAddress(address: string, rawX: number, rawY: number, sourc
       x,
       y,
       callbacks: {
-        onDismiss: () => { if (activeController === c) closeActivePopup(); },
+        onDismiss: () => { if (activeController === c) dismissActivePopup(); },
         onGear: () => { chrome.runtime.sendMessage({ type: "OPEN_POPUP" }).catch(() => {}); },
         onBuy: () => {
           const ticker = tokenData?.price?.symbol ?? address.slice(0, 6);
@@ -94,6 +110,7 @@ async function triggerAddress(address: string, rawX: number, rawY: number, sourc
       },
     });
     activeController = c;
+    activeAddress = address;
     return c;
   };
 
@@ -216,11 +233,33 @@ function requestVerdict(
 let debounce: ReturnType<typeof setTimeout> | null = null;
 const DEBOUNCE_MS = 350;
 
-function onSelectionChange(): void {
+/** True when the event came from inside our own popup (e.g. clicking Cancel). */
+function fromPopup(e: Event): boolean {
+  const host = document.getElementById("quickdraw-host");
+  return !!host && e.composedPath().includes(host);
+}
+
+// A click on a button leaves the highlight in place but is not a new
+// selection. A drag or double/triple-click is, even over the same text.
+let downAt: { x: number; y: number } | null = null;
+document.addEventListener("mousedown", (e) => { downAt = { x: e.clientX, y: e.clientY }; }, true);
+
+function isSelectGesture(e: Event): boolean {
+  if (e instanceof KeyboardEvent) return e.shiftKey;
+  if (!(e instanceof MouseEvent)) return false;
+  if (e.detail >= 2) return true;
+  return !!downAt && Math.hypot(e.clientX - downAt.x, e.clientY - downAt.y) > 3;
+}
+
+function onSelectionChange(e: Event): void {
+  if (fromPopup(e)) return;
+  if (isSelectGesture(e)) dismissGuard.rearm();
   if (debounce) clearTimeout(debounce);
   debounce = setTimeout(() => {
     const detection = detectInSelection();
     if (!detection || detection.type !== "address") return;
+    // Same highlighted CA the user just cancelled — wait for a new selection.
+    if (!dismissGuard.allowSelection(detection.value, selectionText())) return;
     const rect = detection.rect;
     const anchorEl = window.getSelection()?.anchorNode?.parentElement ?? undefined;
     triggerAddress(detection.value, rect.left, rect.bottom, anchorEl, "selection");
@@ -228,14 +267,15 @@ function onSelectionChange(): void {
 }
 
 document.addEventListener("mouseup", onSelectionChange, true);
-document.addEventListener("keyup", (e) => { if (e.shiftKey) onSelectionChange(); }, true);
+document.addEventListener("keyup", (e) => { if (e.shiftKey) onSelectionChange(e); }, true);
+document.addEventListener("selectionchange", () => dismissGuard.selectionChanged(selectionText()));
 
 document.addEventListener("keydown", (e) => {
-  if (e.key === "Escape") closeActivePopup();
+  if (e.key === "Escape" && activeController) dismissActivePopup();
 });
 document.addEventListener("mousedown", (e) => {
   const host = document.getElementById("quickdraw-host");
-  if (host && !host.contains(e.target as Node)) closeActivePopup();
+  if (host && !host.contains(e.target as Node)) dismissActivePopup();
 });
 
 // ── MutationObserver ───────────────────────────────────────────────────────────
