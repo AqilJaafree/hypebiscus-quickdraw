@@ -63,6 +63,62 @@ export function installEmailGuard(router: RouterLike = RouterController as unkno
   return () => { unsubView(); unsubData(); doc.removeEventListener("inputChange", onInput, true); };
 }
 
+// ── Collapsed-body heal ───────────────────────────────────────────────────────
+// AppKit sizes the dialog body from a ResizeObserver on the current screen
+// (w3m-router-container → --local-container-height). In some browsers that
+// measurement isn't updated after switching to the code screen, so the body
+// stays at 0px: the header shows, the code boxes exist but are invisible.
+// If the container is collapsed while its content has height, size it ourselves.
+
+export const healState = { heals: 0, last: "" };
+
+/** querySelectorAll that also searches open shadow roots. */
+export function deepQueryAll(root: ParentNode, selector: string, limit = 2000): Element[] {
+  const out: Element[] = [];
+  const stack: ParentNode[] = [root];
+  let seen = 0;
+  while (stack.length && seen < limit) {
+    const node = stack.pop()!;
+    for (const el of Array.from(node.querySelectorAll("*"))) {
+      if (++seen > limit) break;
+      if (el.matches(selector)) out.push(el);
+      if (el.shadowRoot) stack.push(el.shadowRoot);
+    }
+  }
+  return out;
+}
+
+export function measureRouter(doc: Document = document): { container: number; content: number; el: HTMLElement | null } {
+  const el = deepQueryAll(doc, "w3m-router-container")[0] as HTMLElement | undefined;
+  if (!el?.shadowRoot) return { container: -1, content: -1, el: null };
+  const container = el.shadowRoot.querySelector(".container") as HTMLElement | null;
+  const content = el.shadowRoot.querySelector(".page-content") as HTMLElement | null;
+  const slotted = el.shadowRoot.querySelector("slot")?.assignedElements() ?? [];
+  const contentH = Math.max(content?.scrollHeight ?? 0, ...slotted.map(s => (s as HTMLElement).scrollHeight || s.getBoundingClientRect().height));
+  return { container: container?.getBoundingClientRect().height ?? -1, content: Math.round(contentH), el };
+}
+
+export function installCollapseHeal(router: RouterLike = RouterController as unknown as RouterLike, doc: Document = document): void {
+  let timer: ReturnType<typeof setInterval> | undefined;
+  const watch = (): void => {
+    clearInterval(timer);
+    let ticks = 0;
+    timer = setInterval(() => {
+      ticks++;
+      const m = measureRouter(doc);
+      if (m.el && m.container >= 0 && m.container < 24 && m.content > 40) {
+        m.el.style.setProperty("--local-container-height", `${m.content}px`);
+        healState.heals++;
+        healState.last = `${router.state.view}: ${Math.round(m.container)}px → ${m.content}px`;
+      }
+      // Watch every screen for ~5 s, and the email screens for as long as they're open.
+      if (ticks >= 20 && !(EMAIL_VIEWS as readonly string[]).includes(router.state.view)) clearInterval(timer);
+    }, 250);
+  };
+  router.subscribeKey("view", watch);
+  watch();
+}
+
 // ── ?debug=1 panel ────────────────────────────────────────────────────────────
 // Shows what AppKit is doing when the email step misbehaves, so a screenshot
 // is enough to diagnose it. Never shows the email itself.
@@ -106,6 +162,7 @@ export function installDebugPanel(router: RouterLike = RouterController as unkno
       `quickdraw debug · AppKit 1.8.21`,
       `view: ${view}   data.email: ${data?.email ? "present" : "MISSING"}   guard: email captured=${guardState.lastEmailCaptured} repairs=${guardState.repairs}`,
       `views: ${history.join(" → ")}`,
+      (() => { const m = measureRouter(doc); return `body: container=${Math.round(m.container)}px content=${m.content}px   heals=${healState.heals}${healState.last ? ` (${healState.last})` : ""}`; })(),
       `events:`,
       ...(errors.length ? errors : ["  (none)"]),
     ].join("\n");
@@ -114,4 +171,5 @@ export function installDebugPanel(router: RouterLike = RouterController as unkno
   router.subscribeKey("data", render);
   history.push(router.state.view);
   render();
+  setInterval(render, 500); // keep the body measurements live
 }

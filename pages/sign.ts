@@ -15,7 +15,7 @@
 import { createAppKit } from "@reown/appkit";
 import { SolanaAdapter } from "@reown/appkit-adapter-solana";
 import { solana } from "@reown/appkit/networks";
-import { installEmailGuard } from "./email-guard";
+import { installEmailGuard, installCollapseHeal } from "./email-guard";
 import { VersionedTransaction } from "@solana/web3.js";
 
 declare const __REOWN_PROJECT_ID__: string;
@@ -127,6 +127,7 @@ function createModal(): Modal {
     themeVariables: { "--w3m-accent": "#f5e642", "--w3m-border-radius-master": "0px" },
   });
   installEmailGuard();
+  installCollapseHeal();
   return modal;
 }
 

@@ -1,7 +1,7 @@
 import { createAppKit } from "@reown/appkit";
 import { SolanaAdapter } from "@reown/appkit-adapter-solana";
 import { solana } from "@reown/appkit/networks";
-import { installEmailGuard, installDebugPanel } from "./email-guard";
+import { installEmailGuard, installDebugPanel, installCollapseHeal } from "./email-guard";
 
 declare const __REOWN_PROJECT_ID__: string;
 const PROJECT_ID = __REOWN_PROJECT_ID__;
@@ -88,6 +88,7 @@ async function main(): Promise<void> {
     },
   });
   installEmailGuard();
+  installCollapseHeal();
   if (new URLSearchParams(location.search).get("debug") === "1") installDebugPanel();
 
   if (logout) {
