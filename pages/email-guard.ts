@@ -98,6 +98,23 @@ export function measureRouter(doc: Document = document): { container: number; co
   return { container: container?.getBoundingClientRect().height ?? -1, content: Math.round(contentH), el };
 }
 
+/** For the debug panel: is the open screen's element AppKit's own, and did it draw? */
+function viewElementLine(doc: Document): string {
+  const container = deepQueryAll(doc, "w3m-router-container")[0];
+  const slotted = (container?.shadowRoot?.querySelector("slot")?.assignedElements() ?? [])[0] as HTMLElement | undefined;
+  const routerEl = deepQueryAll(doc, "w3m-router")[0];
+  const viewEl = (routerEl?.shadowRoot ? Array.from(routerEl.shadowRoot.querySelectorAll("*")).find(e => e.tagName.toLowerCase().startsWith("w3m-") && e.tagName.toLowerCase().endsWith("-view")) : undefined) as HTMLElement | undefined;
+  const el = viewEl ?? slotted;
+  if (!el) return "screen element: not found";
+  const tag = el.tagName.toLowerCase();
+  const def = customElements.get(tag);
+  const upgraded = def ? el instanceof def : false;
+  const otp = customElements.get("wui-otp");
+  return `screen element: <${tag}> registered=${!!def} upgraded=${upgraded} shadowChildren=${el.shadowRoot?.childElementCount ?? "none"} ` +
+    `height=${Math.round(el.getBoundingClientRect().height)}px  wui-otp registered=${!!otp}  ` +
+    `ext-scripts=${Array.from(doc.scripts).filter(sc => /^(chrome|moz)-extension:/.test(sc.src)).length}`;
+}
+
 export function installCollapseHeal(router: RouterLike = RouterController as unknown as RouterLike, doc: Document = document): void {
   let timer: ReturnType<typeof setInterval> | undefined;
   const watch = (): void => {
@@ -162,6 +179,7 @@ export function installDebugPanel(router: RouterLike = RouterController as unkno
       `quickdraw debug · AppKit 1.8.21`,
       `view: ${view}   data.email: ${data?.email ? "present" : "MISSING"}   guard: email captured=${guardState.lastEmailCaptured} repairs=${guardState.repairs}`,
       `views: ${history.join(" → ")}`,
+      viewElementLine(doc),
       (() => { const m = measureRouter(doc); return `body: container=${Math.round(m.container)}px content=${m.content}px   heals=${healState.heals}${healState.last ? ` (${healState.last})` : ""}`; })(),
       `events:`,
       ...(errors.length ? errors : ["  (none)"]),
