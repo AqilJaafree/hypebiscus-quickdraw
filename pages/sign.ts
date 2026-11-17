@@ -14,8 +14,12 @@
 
 import { createAppKit } from "@reown/appkit";
 import { SolanaAdapter } from "@reown/appkit-adapter-solana";
-import { solana } from "@reown/appkit/networks";
-import { installEmailGuard, installCollapseHeal } from "./email-guard";
+import { solana, type AppKitNetwork } from "@reown/appkit/networks";
+
+// AppKit 2.0.0's own typings disagree with viem 2.58 about the network object
+// (prepareTransactionRequest options). Type-only; the runtime object is unchanged.
+const SOLANA = solana as unknown as AppKitNetwork;
+import { installEmailGuard, installCollapseHeal, installEmailFallback } from "./email-guard";
 import { VersionedTransaction } from "@solana/web3.js";
 
 declare const __REOWN_PROJECT_ID__: string;
@@ -109,7 +113,7 @@ function waitForAddress(modal: Modal, ms: number): Promise<string | null> {
 function createModal(): Modal {
   const modal = createAppKit({
     adapters: [new SolanaAdapter()],
-    networks: [solana],
+    networks: [SOLANA],
     projectId: PROJECT_ID,
     metadata: {
       name: "Quickdraw",
@@ -128,6 +132,7 @@ function createModal(): Modal {
   });
   installEmailGuard();
   installCollapseHeal();
+  installEmailFallback();
   return modal;
 }
 

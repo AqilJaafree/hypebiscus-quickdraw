@@ -9,7 +9,7 @@
 // `inputChange` event) and, if an email screen shows up without it, reopen
 // that screen with the remembered address.
 
-import { RouterController, ModalController, ChainController } from "@reown/appkit-controllers";
+import { RouterController, ModalController, ChainController, ConnectorController, ConnectionController } from "@reown/appkit-controllers";
 
 const EMAIL_VIEWS = ["EmailVerifyOtp", "EmailVerifyDevice"] as const;
 type EmailView = typeof EMAIL_VIEWS[number];
@@ -136,6 +136,97 @@ export function installCollapseHeal(router: RouterLike = RouterController as unk
   watch();
 }
 
+// ── Fallback email panel ──────────────────────────────────────────────────────
+// In some browsers AppKit's email screens ("Register Device", "Confirm Email")
+// draw nothing at all: the view element exists with 0px content and no error.
+// When that happens we draw our own panel over the dialog and drive the same
+// auth-connector calls the AppKit screens make.
+
+export const fallbackState = { shown: 0, submitted: 0, lastError: "" };
+
+type AuthProvider = { connectOtp(o: { otp: string }): Promise<unknown> };
+
+async function submitOtp(otp: string): Promise<void> {
+  const auth = ConnectorController.getAuthConnector() as unknown as ({ provider: AuthProvider } & Parameters<typeof ConnectionController.connectExternal>[0]) | undefined;
+  if (!auth) throw new Error("Email sign-in isn't ready yet. Reload the page and try again");
+  await auth.provider.connectOtp({ otp });
+  const namespace = ChainController.state.activeChain;
+  if (!namespace) throw new Error("No active network");
+  await ConnectionController.connectExternal(auth, namespace);
+  ModalController.close();
+}
+
+export function installEmailFallback(router: RouterLike = RouterController as unknown as RouterLike, doc: Document = document, delayMs = 1500): void {
+  const panel = doc.createElement("div");
+  panel.setAttribute("role", "dialog");
+  panel.setAttribute("aria-live", "polite");
+  panel.style.cssText = "position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:2147483646;" +
+    "width:min(360px,calc(100vw - 32px));box-sizing:border-box;padding:24px;background:#1a1a1a;color:#ededed;" +
+    "border:2px solid #000;box-shadow:3px 3px 0 #333;font:14px/20px system-ui,sans-serif;display:none";
+  doc.body.appendChild(panel);
+
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const hide = (): void => { panel.style.display = "none"; panel.textContent = ""; };
+  const esc = (t: string): string => t.replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]!));
+
+  const showDevice = (email: string): void => {
+    panel.innerHTML = `
+      <div style="font-weight:600;font-size:16px;margin-bottom:8px">Approve this browser</div>
+      <p style="margin:0 0 12px;color:#a1a1a6">We emailed a login link to <b style="color:#ededed">${esc(email)}</b>. Open it in this browser, then come back to this tab.</p>
+      <p style="margin:0;color:#85858b;font-size:12px">After you approve, a second email arrives with a 6-digit code.</p>`;
+    panel.style.display = "block";
+  };
+
+  const showOtp = (email: string): void => {
+    panel.innerHTML = `
+      <form id="qd-otp-form" novalidate style="display:flex;flex-direction:column;gap:12px;margin:0">
+        <div style="font-weight:600;font-size:16px">Enter your code</div>
+        <p style="margin:0;color:#a1a1a6">We sent a 6-digit code to <b style="color:#ededed">${esc(email)}</b>. It expires in 20 minutes.</p>
+        <input id="qd-otp" inputmode="numeric" autocomplete="one-time-code"
+          aria-label="6-digit code" placeholder="000000"
+          style="height:44px;padding:0 12px;background:#232325;color:#ededed;border:1px solid rgba(255,255,255,.16);font:20px/1 ui-monospace,monospace;letter-spacing:.3em;text-align:center;outline-color:#f5e642">
+        <div id="qd-otp-err" style="color:#e5484d;min-height:0"></div>
+        <button id="qd-otp-go" type="submit" style="height:44px;background:#f5e642;color:#111;border:2px solid #000;box-shadow:3px 3px 0 #333;font-weight:700;cursor:pointer">Confirm</button>
+      </form>`;
+    panel.style.display = "block";
+    const form = panel.querySelector<HTMLFormElement>("#qd-otp-form")!;
+    const input = panel.querySelector<HTMLInputElement>("#qd-otp")!;
+    const err = panel.querySelector<HTMLElement>("#qd-otp-err")!;
+    const btn = panel.querySelector<HTMLButtonElement>("#qd-otp-go")!;
+    input.addEventListener("input", () => { input.value = input.value.replace(/\D/g, "").slice(0, 6); err.textContent = ""; });
+    input.focus();
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      if (!/^\d{6}$/.test(input.value)) { err.textContent = "Enter the 6 digits from the email"; return; }
+      btn.disabled = true; btn.textContent = "Checking…"; fallbackState.submitted++;
+      try {
+        await submitOtp(input.value);
+        hide();
+      } catch (ex) {
+        const msg = ex instanceof Error ? ex.message : String(ex);
+        fallbackState.lastError = msg.slice(0, 160);
+        err.textContent = /invalid|incorrect|wrong/i.test(msg) ? "That code didn't work. Check the latest email and try again" : msg;
+        btn.disabled = false; btn.textContent = "Confirm";
+      }
+    });
+  };
+
+  const onView = (): void => {
+    clearTimeout(timer);
+    const view = router.state.view;
+    if (!(EMAIL_VIEWS as readonly string[]).includes(view)) { hide(); return; }
+    timer = setTimeout(() => {
+      if (router.state.view !== view) return;
+      if (measureRouter(doc).content > 0) return;          // AppKit drew it; nothing to do
+      const email = router.state.data?.email ?? "";
+      fallbackState.shown++;
+      if (view === "EmailVerifyDevice") showDevice(email); else showOtp(email);
+    }, delayMs);
+  };
+  router.subscribeKey("view", onView);
+  onView();
+}
+
 // ── ?debug=1 panel ────────────────────────────────────────────────────────────
 // Shows what AppKit is doing when the email step misbehaves, so a screenshot
 // is enough to diagnose it. Never shows the email itself.
@@ -176,10 +267,11 @@ export function installDebugPanel(router: RouterLike = RouterController as unkno
   function render(): void {
     const { view, data } = router.state;
     panel.textContent = [
-      `quickdraw debug · AppKit 1.8.21`,
+      `quickdraw debug · AppKit 2.0.0`,
       `view: ${view}   data.email: ${data?.email ? "present" : "MISSING"}   guard: email captured=${guardState.lastEmailCaptured} repairs=${guardState.repairs}`,
       `views: ${history.join(" → ")}`,
       viewElementLine(doc),
+      `fallback: shown=${fallbackState.shown} submitted=${fallbackState.submitted}${fallbackState.lastError ? ` lastError=${fallbackState.lastError}` : ""}`,
       (() => { const m = measureRouter(doc); return `body: container=${Math.round(m.container)}px content=${m.content}px   heals=${healState.heals}${healState.last ? ` (${healState.last})` : ""}`; })(),
       `events:`,
       ...(errors.length ? errors : ["  (none)"]),
