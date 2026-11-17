@@ -10,6 +10,7 @@
 // that screen with the remembered address.
 
 import { RouterController, ModalController, ChainController, ConnectorController, ConnectionController } from "@reown/appkit-controllers";
+import { W3mFrameHelpers } from "@reown/appkit-wallet";
 
 const EMAIL_VIEWS = ["EmailVerifyOtp", "EmailVerifyDevice"] as const;
 type EmailView = typeof EMAIL_VIEWS[number];
@@ -144,10 +145,17 @@ export function installCollapseHeal(router: RouterLike = RouterController as unk
 
 export const fallbackState = { shown: 0, submitted: 0, lastError: "" };
 
-type AuthProvider = { connectOtp(o: { otp: string }): Promise<unknown> };
+type AuthProvider = {
+  connectOtp(o: { otp: string }): Promise<unknown>;
+  connectEmail(o: { email: string }): Promise<{ action?: string }>;
+};
+
+function authConnector() {
+  return ConnectorController.getAuthConnector() as unknown as ({ provider: AuthProvider } & Parameters<typeof ConnectionController.connectExternal>[0]) | undefined;
+}
 
 async function submitOtp(otp: string): Promise<void> {
-  const auth = ConnectorController.getAuthConnector() as unknown as ({ provider: AuthProvider } & Parameters<typeof ConnectionController.connectExternal>[0]) | undefined;
+  const auth = authConnector();
   if (!auth) throw new Error("Email sign-in isn't ready yet. Reload the page and try again");
   await auth.provider.connectOtp({ otp });
   const namespace = ChainController.state.activeChain;
@@ -166,15 +174,76 @@ export function installEmailFallback(router: RouterLike = RouterController as un
   doc.body.appendChild(panel);
 
   let timer: ReturnType<typeof setTimeout> | undefined;
-  const hide = (): void => { panel.style.display = "none"; panel.textContent = ""; };
+  let countdown: ReturnType<typeof setInterval> | undefined;
+  const hide = (): void => { clearInterval(countdown); panel.style.display = "none"; panel.textContent = ""; };
+
+  const LINK = "background:none;border:none;padding:4px 0;font:inherit;font-size:13px;cursor:pointer";
+  const footer = (resendLabel: string): string => `
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-top:16px;padding-top:12px;border-top:1px solid rgba(255,255,255,.08)">
+        <button id="qd-fb-back" type="button" style="${LINK};color:#a1a1a6">← Back</button>
+        <button id="qd-fb-resend" type="button" data-label="${resendLabel}" style="${LINK};color:#f5e642">${resendLabel}</button>
+      </div>
+      <div id="qd-fb-note" role="status" style="margin-top:8px;font-size:12px;color:#85858b;min-height:0"></div>`;
+
+  /** Back to the email field, the same place AppKit's own back arrow goes. */
+  const goBack = (): void => {
+    hide();
+    router.reset("Connect");
+  };
+
+  /** Send a fresh email, honouring AppKit's 30 s cooldown, and follow wherever Reown routes next. */
+  const wireFooter = (email: string): void => {
+    const back = panel.querySelector<HTMLButtonElement>("#qd-fb-back")!;
+    const resend = panel.querySelector<HTMLButtonElement>("#qd-fb-resend")!;
+    const note = panel.querySelector<HTMLElement>("#qd-fb-note")!;
+    const label = resend.dataset.label ?? "Resend";
+    back.addEventListener("click", goBack);
+
+    const tick = (): void => {
+      const wait = W3mFrameHelpers.getTimeToNextEmailLogin();
+      resend.disabled = wait > 0;
+      resend.style.opacity = wait > 0 ? "0.5" : "1";
+      resend.style.cursor = wait > 0 ? "default" : "pointer";
+      resend.textContent = wait > 0 ? `${label} in ${wait}s` : label;
+    };
+    clearInterval(countdown);
+    countdown = setInterval(tick, 1000);
+    tick();
+
+    resend.addEventListener("click", async () => {
+      if (resend.disabled || !email) return;
+      const auth = authConnector();
+      if (!auth) { note.style.color = "#e5484d"; note.textContent = "Email sign-in isn't ready yet. Reload the page and try again"; return; }
+      resend.disabled = true; resend.textContent = "Sending…";
+      try {
+        const { action } = await auth.provider.connectEmail({ email });
+        const next = action === "VERIFY_DEVICE" ? "EmailVerifyDevice" : action === "VERIFY_OTP" ? "EmailVerifyOtp" : null;
+        if (next && next !== router.state.view) {
+          // Reown now wants the other step: move AppKit there; the fallback follows the view.
+          router.reset("Connect");
+          router.push(next, { email });
+          return;
+        }
+        note.style.color = "#4cc38a";
+        note.textContent = router.state.view === "EmailVerifyDevice" ? "New login link sent. Check your inbox" : "New code sent. Check your inbox";
+      } catch (ex) {
+        note.style.color = "#e5484d";
+        note.textContent = ex instanceof Error ? ex.message : String(ex);
+      } finally {
+        tick();
+      }
+    });
+  };
   const esc = (t: string): string => t.replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]!));
 
   const showDevice = (email: string): void => {
     panel.innerHTML = `
       <div style="font-weight:600;font-size:16px;margin-bottom:8px">Approve this browser</div>
       <p style="margin:0 0 12px;color:#a1a1a6">We emailed a login link to <b style="color:#ededed">${esc(email)}</b>. Open it in this browser, then come back to this tab.</p>
-      <p style="margin:0;color:#85858b;font-size:12px">After you approve, a second email arrives with a 6-digit code.</p>`;
+      <p style="margin:0;color:#85858b;font-size:12px">After you approve, a second email arrives with a 6-digit code.</p>
+      ${footer("Resend email")}`;
     panel.style.display = "block";
+    wireFooter(email);
   };
 
   const showOtp = (email: string): void => {
@@ -187,8 +256,10 @@ export function installEmailFallback(router: RouterLike = RouterController as un
           style="height:44px;padding:0 12px;background:#232325;color:#ededed;border:1px solid rgba(255,255,255,.16);font:20px/1 ui-monospace,monospace;letter-spacing:.3em;text-align:center;outline-color:#f5e642">
         <div id="qd-otp-err" style="color:#e5484d;min-height:0"></div>
         <button id="qd-otp-go" type="submit" style="height:44px;background:#f5e642;color:#111;border:2px solid #000;box-shadow:3px 3px 0 #333;font-weight:700;cursor:pointer">Confirm</button>
-      </form>`;
+      </form>
+      ${footer("Resend code")}`;
     panel.style.display = "block";
+    wireFooter(email);
     const form = panel.querySelector<HTMLFormElement>("#qd-otp-form")!;
     const input = panel.querySelector<HTMLInputElement>("#qd-otp")!;
     const err = panel.querySelector<HTMLElement>("#qd-otp-err")!;
