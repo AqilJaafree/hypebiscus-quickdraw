@@ -9,7 +9,7 @@
 // `inputChange` event) and, if an email screen shows up without it, reopen
 // that screen with the remembered address.
 
-import { RouterController } from "@reown/appkit-controllers";
+import { RouterController, ModalController, ChainController } from "@reown/appkit-controllers";
 
 const EMAIL_VIEWS = ["EmailVerifyOtp", "EmailVerifyDevice"] as const;
 type EmailView = typeof EMAIL_VIEWS[number];
@@ -76,7 +76,7 @@ export function installDebugPanel(router: RouterLike = RouterController as unkno
   const push = (kind: string, msg: unknown): void => {
     const text = msg instanceof Error ? `${msg.name}: ${msg.message}` : String(msg);
     errors.push(`${new Date().toISOString().slice(11, 19)} ${kind}: ${text.replace(/[^\s@]+@[^\s@]+/g, "<email>").slice(0, 300)}`);
-    if (errors.length > 12) errors.shift();
+    if (errors.length > 20) errors.shift();
     render();
   };
   const origError = console.error.bind(console);
@@ -84,13 +84,29 @@ export function installDebugPanel(router: RouterLike = RouterController as unkno
   addEventListener("error", (e) => push("error", (e as ErrorEvent).error ?? (e as ErrorEvent).message));
   addEventListener("unhandledrejection", (e) => push("rejection", (e as PromiseRejectionEvent).reason));
   const history: string[] = [];
+
+  // Who closes the modal / resets the router, and what else happened around it.
+  const callers = (): string => (new Error().stack ?? "").split("\n").slice(3, 8)
+    .map(l => l.trim().replace(/^at /, "").replace(/\(?https?:\/\/[^)]*\/([^/)]+)\)?/, "[$1]")).join(" < ");
+  const mc = ModalController as unknown as { close: (...a: unknown[]) => unknown };
+  const origClose = mc.close.bind(mc);
+  mc.close = (...a: unknown[]) => { push("modal.close", callers()); return origClose(...a); };
+  const rc = RouterController as unknown as { reset: (v: string, d?: unknown) => unknown };
+  const origReset = rc.reset.bind(rc);
+  rc.reset = (v: string, d?: unknown) => { push("router.reset", `${v} ← ${callers()}`); return origReset(v, d); };
+  const cc = ChainController as unknown as { state: { activeCaipAddress?: string }; subscribeKey(k: string, cb: (v: unknown) => void): void };
+  cc.subscribeKey("activeCaipAddress", (v) => push("address", v ? "set" : "cleared"));
+  addEventListener("visibilitychange", () => push("tab", doc.visibilityState));
+  addEventListener("blur", () => push("window", "blur"));
+  addEventListener("focus", () => push("window", "focus"));
+
   function render(): void {
     const { view, data } = router.state;
     panel.textContent = [
       `quickdraw debug · AppKit 1.8.21`,
       `view: ${view}   data.email: ${data?.email ? "present" : "MISSING"}   guard: email captured=${guardState.lastEmailCaptured} repairs=${guardState.repairs}`,
       `views: ${history.join(" → ")}`,
-      `errors:`,
+      `events:`,
       ...(errors.length ? errors : ["  (none)"]),
     ].join("\n");
   }
