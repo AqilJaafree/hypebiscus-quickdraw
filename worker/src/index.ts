@@ -20,11 +20,13 @@
  *   GET  /defi/jupiter/price         → Jupiter price/v3, returned in the v2 `{ data }` shape
  *   GET  /defi/safety/rugcheck       → RugCheck report proxy
  *   GET  /defi/token                 → Alchemy DAS token metadata (alias /defi/helius/token)
+ *   *    /alerts, /watchlist, /push, /import → signed proxy to the Railway service (extension auth + X-QD-Install)
  *   GET  /defi/portfolio             → Alchemy RPC balances + Jupiter prices (alias /defi/helius/portfolio)
  *   POST /ai/signals                 → Jev Router (OpenRouter) context signals for a detected address
  */
 
 import { getPortfolio, alchemySolanaUrl, RpcError } from "./portfolio";
+import { isRailwayPath, proxyToRailway } from "./railway";
 import { fetchSignals, parseSignalsRequest } from "./jev";
 import { buildNarrationBody, parseNarrationRequest } from "./narration";
 
@@ -36,6 +38,8 @@ export interface Env {
   ASSEMBLYAI_API_KEY: string;
   REOWN_PROJECT_ID: string;
   OPENROUTER_API_KEY?: string;
+  RAILWAY_URL?: string;              // public URL of the Railway alerts service
+  RAILWAY_INTERNAL_SECRET?: string;  // signs Worker → Railway requests
   RATE_LIMIT_KV: KVNamespace;   // market-pulse cache only
   RATE_LIMITER: RateLimit;      // Workers Rate Limiting binding (wrangler.toml [[ratelimits]])
 }
@@ -104,7 +108,7 @@ async function checkRateLimit(ip: string, limiter: RateLimit): Promise<boolean> 
 const cors = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Quickdraw-Client, X-Quickdraw-Timestamp, X-Quickdraw-Sig",
+  "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Quickdraw-Client, X-Quickdraw-Timestamp, X-Quickdraw-Sig, X-QD-Install",
 };
 
 function json(data: unknown, status = 200): Response {
@@ -603,6 +607,9 @@ export default {
       }
       if (url.pathname === "/defi/jupiter/swap" && req.method === "POST") {
         return handleJupiterSwap(req);
+      }
+      if (isRailwayPath(url.pathname)) {
+        return proxyToRailway(req, url, env);
       }
       return err("Not found", 404);
     }

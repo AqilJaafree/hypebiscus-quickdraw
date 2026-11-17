@@ -62,12 +62,25 @@ export interface WalletState {
   connected: boolean;
 }
 
+/** Legacy alert kept in chrome.storage by builds ≤ v0.1.1; migrated to ServerAlert. */
 export interface PriceAlert {
   mint: string;
   ticker: string;
   condition: "ABOVE" | "BELOW";
   price: number;
   triggered: boolean;
+}
+
+/** An alert stored on the Railway service. */
+export interface ServerAlert {
+  id: string;
+  mint: string;
+  ticker: string;
+  condition: "ABOVE" | "BELOW";
+  price: number;
+  triggered: boolean;
+  lastPrice: number | null;
+  firedAt: string | null;
 }
 
 export interface WatchItem {
@@ -124,10 +137,12 @@ export type BgRequest =
   | { type: "set_wallet"; wallet: WalletState }
   | { type: "get_detection_enabled" }
   | { type: "set_detection_enabled"; enabled: boolean }
-  | { type: "get_alerts" }
-  | { type: "set_alerts"; alerts: PriceAlert[] }
-  | { type: "get_watchlist" }
-  | { type: "set_watchlist"; watchlist: WatchItem[] }
+  | { type: "list_alerts" }
+  | { type: "create_alert"; mint: string; ticker: string; condition: "ABOVE" | "BELOW"; price: number }
+  | { type: "delete_alert"; id: string }
+  | { type: "list_watchlist" }
+  | { type: "add_watch"; mint: string; ticker: string }
+  | { type: "remove_watch"; mint: string }
   | { type: "get_watchlist_prices"; mints: string[] }
   | { type: "get_skill_settings" }
   | { type: "set_skill_settings"; settings: SkillSettings }

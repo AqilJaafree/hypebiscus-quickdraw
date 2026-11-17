@@ -61,6 +61,8 @@ export const ICON = {
   copy:     svg('<rect width="14" height="14" x="8" y="8" rx="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/>', 12),
   check:    svg('<path d="M20 6 9 17l-5-5"/>', 12),
   external: svg('<path d="M7 7h10v10"/><path d="M7 17 17 7"/>', 12),
+  bookmark: svg('<path d="m19 21-7-4-7 4V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v16z"/>'),
+  bookmarkOn: '<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" aria-hidden="true"><path d="m19 21-7-4-7 4V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v16z"/></svg>',
 } as const;
 
 const FONT_FAMILY = "QD Space Mono";

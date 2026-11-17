@@ -1,0 +1,33 @@
+{
+  "name": "quickdraw-railway",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Quickdraw always-on services: alerts, watchlist, Web Push",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "esbuild src/server.ts --bundle --platform=node --target=node22 --format=esm --packages=external --outfile=dist/server.js",
+    "start": "node dist/server.js",
+    "dev": "npm run build && node --env-file=.env dist/server.js",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "vapid": "node --input-type=module -e \"import {generateVAPIDKeys} from 'web-push';const k=generateVAPIDKeys();console.log('VAPID_PUBLIC_KEY='+k.publicKey);console.log('VAPID_PRIVATE_KEY='+k.privateKey)\""
+  },
+  "dependencies": {
+    "@hono/node-server": "^2.1.9",
+    "hono": "^4.13.19",
+    "pg": "^8.23.1",
+    "web-push": "^4.0.0"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "^0.5.16",
+    "@types/node": "^26.6.6",
+    "@types/pg": "^8.23.1",
+    "@types/web-push": "^3.6.4",
+    "esbuild": "^0.28.2",
+    "typescript": "^7.0.2",
+    "vitest": "^5.1.0"
+  }
+}

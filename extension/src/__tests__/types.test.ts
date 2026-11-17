@@ -25,12 +25,12 @@ describe("DEFAULT_SKILL_SETTINGS", () => {
 });
 
 describe("BgRequest discriminated union", () => {
-  it("get_alerts type narrows correctly", () => {
-    const req: BgRequest = { type: "get_alerts" };
-    expect(req.type).toBe("get_alerts");
+  it("list_alerts type narrows correctly", () => {
+    const req: BgRequest = { type: "list_alerts" };
+    expect(req.type).toBe("list_alerts");
   });
-  it("set_alerts type narrows correctly", () => {
-    const req: BgRequest = { type: "set_alerts", alerts: [] };
-    expect(req.type).toBe("set_alerts");
+  it("create_alert carries the alert fields", () => {
+    const req: BgRequest = { type: "create_alert", mint: "M", ticker: "T", condition: "ABOVE", price: 1 };
+    expect(req.type === "create_alert" && req.price).toBe(1);
   });
 });
