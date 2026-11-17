@@ -37,9 +37,9 @@ export const SCORE_THRESHOLDS = {
 } as const;
 
 export const SCORE_COLORS = {
-  SAFE: "#8BF542",     // lime green
-  CAUTION: "#F5C842",  // yellow
-  RISK: "#F54242",     // red
+  SAFE: "#4CC38A",     // green
+  CAUTION: "#F59A3C",  // orange — kept apart from brand yellow
+  RISK: "#E5484D",     // red
 } as const;
 
 export const BRAND_COLORS = {

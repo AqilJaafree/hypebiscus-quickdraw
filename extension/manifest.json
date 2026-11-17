@@ -34,6 +34,9 @@
     "default_popup": "popup.html",
     "default_icon": "icons/icon48.png"
   },
+  "web_accessible_resources": [
+    { "resources": ["fonts/*.ttf"], "matches": ["<all_urls>"] }
+  ],
   "externally_connectable": {
     "matches": ["https://quickdraw-auth.pages.dev/*"]
   }

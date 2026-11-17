@@ -4,195 +4,225 @@
   <meta charset="UTF-8" />
   <title>Quickdraw</title>
   <style>
+    @font-face { font-family: 'QD Space Mono'; src: url(fonts/SpaceMono-Regular.ttf); font-weight: 400; }
+    @font-face { font-family: 'QD Space Mono'; src: url(fonts/SpaceMono-Bold.ttf); font-weight: 700; }
+
+    :root {
+      --bg: #181818; --bg-deep: #111111; --raised: #232325;
+      --hairline: rgba(255,255,255,0.08); --hairline-strong: rgba(255,255,255,0.16);
+      --text: #ededed; --text-sec: #a1a1a6; --text-mut: #85858b;
+      --brand: #f5e642; --safe: #4cc38a; --danger: #e5484d;
+      --ease: cubic-bezier(0.22, 1, 0.36, 1);
+    }
     * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { width: 260px; background: #181818; font-family: 'Space Mono', monospace;
-      color: #fff; font-size: 12px; overflow: hidden; }
+    body { width: 280px; background: var(--bg); color: var(--text);
+      font-family: 'QD Space Mono', 'Space Mono', ui-monospace, monospace;
+      font-size: 12px; line-height: 16px; overflow: hidden;
+      font-variant-numeric: tabular-nums; }
+    button { font: inherit; color: inherit; }
+    button:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+    svg { display: block; }
 
     /* ── Header ─────────────────────────────────────────────────────────────── */
     .s-header { display: flex; justify-content: space-between; align-items: center;
-      padding: 12px 9px; background: #111; }
-    .s-title { color: #f5e642; font-size: 12px; font-weight: 700; letter-spacing: 2px; }
-    .s-close { background: none; border: none; color: #555; font-size: 13px;
-      cursor: pointer; font-family: Inter, sans-serif; line-height: 1; }
-    .s-close:hover { color: #888; }
-    .header-line { height: 2px; background: #111; }
+      height: 48px; padding: 0 16px; background: var(--bg-deep); }
+    .s-title { color: var(--brand); font-size: 14px; font-weight: 700; letter-spacing: 0.12em; }
+    .icon-btn { display: grid; place-items: center; width: 28px; height: 28px; margin-right: -6px;
+      background: none; border: none; color: var(--text-mut); cursor: pointer;
+      transition: color 150ms var(--ease); }
+    .icon-btn:hover { color: var(--text); }
 
     /* ── Tabs ───────────────────────────────────────────────────────────────── */
-    .qd-tabs { display: flex; }
-    .qd-tab { flex: 1; padding: 7px 0; font-size: 10px; font-weight: 700;
-      letter-spacing: 1px; cursor: pointer; border: none; font-family: inherit;
-      background: #181818; color: #555; border-bottom: 2px solid transparent; }
-    .qd-tab.active { background: #2a2a2a; color: #fff; border-bottom: 2px solid #f5e642; }
-    .tabs-line { height: 1px; background: #2e2e2e; }
+    .qd-tabs { display: flex; padding: 0 16px; gap: 16px; background: var(--bg-deep);
+      border-bottom: 1px solid var(--hairline); }
+    .qd-tab { height: 36px; padding: 0; border: none; background: none; cursor: pointer;
+      color: var(--text-mut); border-bottom: 2px solid transparent; margin-bottom: -1px;
+      transition: color 150ms var(--ease), border-color 150ms var(--ease); }
+    .qd-tab:hover { color: var(--text-sec); }
+    .qd-tab.active { color: var(--text); border-bottom-color: var(--brand); }
 
     /* ── Panes ──────────────────────────────────────────────────────────────── */
     .qd-pane { display: none; }
     .qd-pane.active { display: block; }
-    .content { padding: 12px; display: flex; flex-direction: column; gap: 12px; }
+    .content { padding: 16px; display: flex; flex-direction: column; gap: 24px; }
 
     /* ── Status row ─────────────────────────────────────────────────────────── */
     .status-row { display: flex; justify-content: space-between; align-items: center; }
-    .status-left { display: flex; align-items: center; gap: 6px; }
-    .status-dot { width: 8px; height: 8px; border-radius: 50%; background: #8bf542;
-      flex-shrink: 0; }
-    .status-dot.paused { background: #555; }
-    #status-text { font-size: 13px; font-weight: 700; }
-    .pause-btn { background: #222; border: 1px solid #444; color: #888; font-size: 11px;
-      font-family: inherit; padding: 3px 10px; cursor: pointer; }
-    .pause-btn:hover { color: #aaa; }
-
-    /* ── Separator ──────────────────────────────────────────────────────────── */
-    .sep { height: 1px; background: #2e2e2e; }
+    .status-left { display: flex; align-items: center; gap: 8px; }
+    .status-dot { width: 8px; height: 8px; background: var(--safe); flex-shrink: 0;
+      box-shadow: 0 0 0 3px rgba(76,195,138,0.16); }
+    .status-dot.paused { background: var(--text-mut); box-shadow: none; }
+    #status-text { font-size: 13px; }
+    .btn-secondary { height: 28px; padding: 0 12px; background: var(--raised); color: var(--text);
+      border: 1px solid var(--hairline); cursor: pointer;
+      transition: background-color 150ms var(--ease), border-color 150ms var(--ease); }
+    .btn-secondary:hover { border-color: var(--hairline-strong); }
 
     /* ── Section ────────────────────────────────────────────────────────────── */
-    .section { display: flex; flex-direction: column; gap: 4px; }
-    .section-label { font-size: 10px; font-weight: 700; color: #666; letter-spacing: 2px; }
-    .stat-row { display: flex; justify-content: space-between; align-items: center;
-      padding: 0 4px; }
-    .stat-row.bordered { border-bottom: 1px solid #2a2a2a; }
-    .stat-key { font-size: 10px; color: #666; }
-    .stat-val { font-size: 11px; font-weight: 700; color: #fff; }
+    .section { display: flex; flex-direction: column; gap: 8px; }
+    .section-label { color: var(--text-mut); }
+    .rows { display: flex; flex-direction: column; }
+    .stat-row { display: flex; justify-content: space-between; align-items: center; height: 28px;
+      border-bottom: 1px solid var(--hairline); }
+    .stat-row:last-child { border-bottom: none; }
+    .stat-key { color: var(--text-sec); }
+    .stat-val { color: var(--text); }
+
+    /* ── Wallet ─────────────────────────────────────────────────────────────── */
+    .btn-primary { width: 100%; height: 40px; background: var(--brand); color: #111;
+      font-weight: 700; font-size: 13px; cursor: pointer;
+      border: 2px solid #000; box-shadow: 3px 3px 0 #333;
+      transition: transform 120ms var(--ease), box-shadow 120ms var(--ease); }
+    .btn-primary:active { transform: translate(2px, 2px); box-shadow: 1px 1px 0 #333; }
+    .wallet-row { display: flex; align-items: center; justify-content: space-between; gap: 8px;
+      height: 40px; padding: 0 12px; background: var(--raised); border: 1px solid var(--hairline); }
+    .wallet-row[hidden] { display: none; }
+    .wallet-id { display: flex; flex-direction: column; min-width: 0; }
+    #wallet-addr { color: var(--text); }
+    #wallet-kind { color: var(--text-mut); font-size: 11px; line-height: 14px; }
+    .link-btn { background: none; border: none; padding: 4px 0; cursor: pointer; color: var(--text-mut);
+      transition: color 150ms var(--ease); }
+    .link-btn:hover { color: var(--danger); }
+
+    /* ── Portfolio ──────────────────────────────────────────────────────────── */
+    .portfolio-total { display: flex; align-items: baseline; justify-content: space-between; }
+    #portfolio-total-val { font-size: 28px; line-height: 32px; font-weight: 700; letter-spacing: -0.02em; }
+    .portfolio-row { display: flex; justify-content: space-between; align-items: center; height: 24px; }
+    .portfolio-sym { color: var(--text-sec); }
+    .portfolio-val { color: var(--text); }
+    .portfolio-empty { color: var(--text-mut); }
 
     /* ── Skills list ────────────────────────────────────────────────────────── */
-    .skill-row { display: flex; justify-content: space-between; align-items: center; }
-    .skill-row.disabled { opacity: 0.45; }
-    .skill-left { display: flex; align-items: center; gap: 8px; }
-    .skill-name { font-size: 12px; font-weight: 700; color: #fff; }
-    .skill-tag { font-size: 8px; font-weight: 700; letter-spacing: 1px; color: #f5e642;
-      border: 1px solid #f5e642; padding: 1px 4px; text-transform: uppercase; line-height: 1.4; }
+    .skills { display: flex; flex-direction: column; }
+    .skill-row { display: flex; justify-content: space-between; align-items: center; height: 40px;
+      border-bottom: 1px solid var(--hairline); }
+    .skill-left { display: flex; align-items: baseline; gap: 8px; }
+    .skill-name { font-size: 13px; color: var(--text); }
+    .skill-tag { font-size: 11px; color: var(--text-mut); }
+    .skill-row.disabled .skill-name { color: var(--text-mut); }
+    .skill-soon { font-size: 11px; color: var(--text-mut); }
 
-    .qd-switch { position: relative; width: 34px; height: 18px; flex-shrink: 0; padding: 0;
-      border: none; background: #444; border-radius: 9px; cursor: pointer; }
-    .qd-switch::after { content: ""; position: absolute; top: 2px; left: 2px; width: 14px;
-      height: 14px; border-radius: 50%; background: #888; }
-    .qd-switch.on { background: #8bf542; }
-    .qd-switch.on::after { left: 18px; background: #111; }
-    .qd-switch:disabled { cursor: not-allowed; }
+    .qd-switch { position: relative; width: 32px; height: 16px; flex-shrink: 0; padding: 0;
+      border: 1px solid var(--hairline-strong); background: var(--raised); cursor: pointer;
+      transition: background-color 150ms var(--ease), border-color 150ms var(--ease); }
+    .qd-switch::after { content: ""; position: absolute; top: 2px; left: 2px; width: 10px; height: 10px;
+      background: var(--text-mut); transition: transform 150ms var(--ease), background-color 150ms var(--ease); }
+    .qd-switch.on { background: var(--safe); border-color: var(--safe); }
+    .qd-switch.on::after { transform: translateX(16px); background: #111; }
 
-    .browse-btn { width: 100%; padding: 10px; background: none; border: 1px dashed #444;
-      color: #555; font-family: inherit; font-size: 10px; font-style: italic;
-      cursor: not-allowed; text-align: center; }
-
-    /* ── Connect button ─────────────────────────────────────────────────────── */
-    #connect-btn { width: 100%; padding: 7px; background: #f5e642; color: #111;
-      font-size: 11px; font-weight: 700; font-family: inherit; cursor: pointer;
-      border: 2px solid #333; box-shadow: 2px 2px 0 #333;
-      letter-spacing: 0.04em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    #connect-btn:hover { filter: brightness(1.05); }
-    #connect-btn.connected { background: #1a1a1a; color: #8bf542;
-      border-color: #2a2a2a; box-shadow: none; }
-    #connect-btn.connected:hover { background: #200; color: #f54242; border-color: #500; }
-    #connect-btn.connected:hover::after { content: " — disconnect"; font-weight: 400; }
-
-    .portfolio-row { display:flex; justify-content:space-between; align-items:center; padding:1px 4px; }
-    .portfolio-sym { font-size:10px; color:#888; }
-    .portfolio-val { font-size:10px; font-weight:700; color:#fff; }
+    .browse-btn { height: 40px; margin-top: 16px; background: none; border: 1px dashed var(--hairline-strong);
+      color: var(--text-mut); cursor: not-allowed; }
 
     /* ── Footer ─────────────────────────────────────────────────────────────── */
-    .footer-sep { height: 1px; background: #2e2e2e; }
-    .footer { padding: 6px 9px; }
-    .footer-ver { font-size: 10px; color: #333; }
+    .footer { display: flex; justify-content: space-between; padding: 8px 16px;
+      border-top: 1px solid var(--hairline); color: var(--text-mut); font-size: 11px; }
   </style>
 </head>
 <body>
   <div class="s-header">
     <span class="s-title">QUICKDRAW</span>
-    <button class="s-close" id="close-btn">✕</button>
+    <button class="icon-btn" id="close-btn" aria-label="Close">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+    </button>
   </div>
-  <div class="header-line"></div>
 
-  <div class="qd-tabs">
-    <button class="qd-tab active" id="tab-state">STATE</button>
-    <button class="qd-tab" id="tab-skills">SKILLS</button>
+  <div class="qd-tabs" role="tablist">
+    <button class="qd-tab active" id="tab-state" role="tab">State</button>
+    <button class="qd-tab" id="tab-skills" role="tab">Skills</button>
   </div>
-  <div class="tabs-line"></div>
 
-  <!-- STATE pane -->
+  <!-- State pane -->
   <div class="qd-pane active" id="pane-state">
     <div class="content">
 
       <div class="status-row">
         <div class="status-left">
           <div class="status-dot" id="status-dot"></div>
-          <span id="status-text">ACTIVE</span>
+          <span id="status-text">Watching pages</span>
         </div>
-        <button class="pause-btn" id="pause-btn">Pause</button>
-      </div>
-
-      <div class="sep"></div>
-
-      <div class="section">
-        <div class="section-label">STATS</div>
-        <div class="stat-row bordered">
-          <span class="stat-key">Last seen</span>
-          <span class="stat-val" id="last-seen">—</span>
-        </div>
-        <div class="stat-row">
-          <span class="stat-key">Session</span>
-          <span class="stat-val" id="session-time">—</span>
-        </div>
+        <button class="btn-secondary" id="pause-btn">Pause</button>
       </div>
 
       <div class="section">
-        <div class="section-label">LOGIN</div>
-        <button id="connect-btn">Connect Wallet</button>
+        <div class="section-label">Session</div>
+        <div class="rows">
+          <div class="stat-row">
+            <span class="stat-key">Last token</span>
+            <span class="stat-val" id="last-seen">—</span>
+          </div>
+          <div class="stat-row">
+            <span class="stat-key">Running for</span>
+            <span class="stat-val" id="session-time">—</span>
+          </div>
+        </div>
       </div>
 
-      <div class="sep" id="portfolio-sep" style="display:none;"></div>
+      <div class="section">
+        <div class="section-label">Wallet</div>
+        <button id="connect-btn" class="btn-primary">Connect wallet</button>
+        <div class="wallet-row" id="wallet-row" hidden>
+          <div class="wallet-id">
+            <span id="wallet-addr"></span>
+            <span id="wallet-kind"></span>
+          </div>
+          <button class="link-btn" id="disconnect-btn">Disconnect</button>
+        </div>
+      </div>
 
       <div class="section" id="portfolio-section" style="display:none;">
-        <div class="section-label">PORTFOLIO</div>
-        <div id="portfolio-list" style="display:flex;flex-direction:column;gap:2px;"></div>
-        <div id="portfolio-total" class="stat-row" style="border-top:1px solid #2a2a2a;margin-top:4px;padding-top:4px;"></div>
+        <div class="portfolio-total">
+          <span class="section-label">Portfolio</span>
+          <span id="portfolio-total-val"></span>
+        </div>
+        <div class="rows" id="portfolio-list"></div>
       </div>
 
     </div>
   </div>
 
-  <!-- SKILLS pane -->
+  <!-- Skills pane -->
   <div class="qd-pane" id="pane-skills">
     <div class="content">
-
-      <div class="skill-row">
-        <div class="skill-left">
-          <span class="skill-name">Jupiter Swap</span>
-          <span class="skill-tag">DEX</span>
+      <div class="skills">
+        <div class="skill-row">
+          <div class="skill-left">
+            <span class="skill-name">Jupiter Swap</span>
+            <span class="skill-tag">DEX</span>
+          </div>
+          <button class="qd-switch on" id="toggle-jupiter" role="switch" aria-label="Toggle Jupiter Swap"></button>
         </div>
-        <button class="qd-switch on" id="toggle-jupiter" aria-label="Toggle Jupiter Swap"></button>
-      </div>
 
-      <div class="skill-row disabled">
-        <div class="skill-left">
-          <span class="skill-name">Drift Protocol</span>
-          <span class="skill-tag">PERPS</span>
+        <div class="skill-row disabled">
+          <div class="skill-left">
+            <span class="skill-name">Drift Protocol</span>
+            <span class="skill-tag">Perps</span>
+          </div>
+          <span class="skill-soon">Soon</span>
         </div>
-        <button class="qd-switch" disabled aria-label="Drift Protocol (coming soon)"></button>
-      </div>
 
-      <div class="skill-row disabled">
-        <div class="skill-left">
-          <span class="skill-name">MarginFi Lend</span>
-          <span class="skill-tag">LENDING</span>
+        <div class="skill-row disabled">
+          <div class="skill-left">
+            <span class="skill-name">MarginFi Lend</span>
+            <span class="skill-tag">Lending</span>
+          </div>
+          <span class="skill-soon">Soon</span>
         </div>
-        <button class="qd-switch" disabled aria-label="MarginFi Lend (coming soon)"></button>
-      </div>
 
-      <div class="skill-row disabled">
-        <div class="skill-left">
-          <span class="skill-name">Kamino Earn</span>
-          <span class="skill-tag">YIELD</span>
+        <div class="skill-row disabled">
+          <div class="skill-left">
+            <span class="skill-name">Kamino Earn</span>
+            <span class="skill-tag">Yield</span>
+          </div>
+          <span class="skill-soon">Soon</span>
         </div>
-        <button class="qd-switch" disabled aria-label="Kamino Earn (coming soon)"></button>
+
+        <button class="browse-btn" disabled>Browse plugins</button>
       </div>
-
-      <button class="browse-btn" disabled>+ Browse plugins</button>
-
     </div>
   </div>
 
-  <div class="footer-sep"></div>
   <div class="footer">
-    <span class="footer-ver">v0.1.1</span>
+    <span>v0.1.1</span>
   </div>
 
   <script type="module" src="dist/popup.js"></script>

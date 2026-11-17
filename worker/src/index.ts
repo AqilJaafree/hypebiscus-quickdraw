@@ -396,7 +396,7 @@ async function handleHeliusPortfolio(url: URL, env: Env): Promise<Response> {
           ownerAddress: wallet,
           page: 1,
           limit: 100,
-          displayOptions: { showFungible: true, showNativeBalance: false },
+          displayOptions: { showFungible: true, showNativeBalance: true },
         },
       }),
     },
@@ -406,6 +406,7 @@ async function handleHeliusPortfolio(url: URL, env: Env): Promise<Response> {
 
   const raw = await upstream.json() as {
     result?: {
+      nativeBalance?: { lamports?: number; price_per_sol?: number };
       items?: Array<{
         id: string;
         interface: string;
@@ -434,6 +435,21 @@ async function handleHeliusPortfolio(url: URL, env: Env): Promise<Response> {
         valueUsd: priceUsd !== null ? balance * priceUsd : null,
       };
     });
+
+  // Native SOL is not a token account, so DAS returns it separately.
+  const native = raw.result?.nativeBalance;
+  if (native && typeof native.lamports === "number" && native.lamports > 0) {
+    const balance = native.lamports / 1e9;
+    const priceUsd = native.price_per_sol ?? null;
+    items.unshift({
+      mint: SOL_MINT,
+      symbol: "SOL",
+      balance,
+      decimals: 9,
+      priceUsd,
+      valueUsd: priceUsd !== null ? balance * priceUsd : null,
+    });
+  }
 
   return json(items);
 }

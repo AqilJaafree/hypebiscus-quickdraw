@@ -1,4 +1,5 @@
 import { sendBg, esc } from "./shared";
+import { fmtUsd } from "./styles";
 import type { WalletState, PortfolioItem, SkillSettings } from "./types";
 
 function formatDuration(ms: number): string {
@@ -11,19 +12,17 @@ function formatDuration(ms: number): string {
 
 async function loadPortfolio(wallet: WalletState): Promise<void> {
   const section = document.getElementById("portfolio-section") as HTMLElement;
-  const sep = document.getElementById("portfolio-sep") as HTMLElement;
   const list = document.getElementById("portfolio-list") as HTMLElement;
-  const total = document.getElementById("portfolio-total") as HTMLElement;
+  const total = document.getElementById("portfolio-total-val") as HTMLElement;
 
   if (!wallet.connected) {
     section.style.display = "none";
-    sep.style.display = "none";
     return;
   }
 
   section.style.display = "";
-  sep.style.display = "";
-  list.innerHTML = `<div class="portfolio-row"><span class="portfolio-sym">Loading…</span></div>`;
+  total.textContent = "";
+  list.innerHTML = `<div class="portfolio-row"><span class="portfolio-empty">Loading…</span></div>`;
 
   try {
     const items = await sendBg<PortfolioItem[]>({ type: "get_portfolio" });
@@ -38,16 +37,12 @@ async function loadPortfolio(wallet: WalletState): Promise<void> {
     list.innerHTML = sorted.map(i =>
       `<div class="portfolio-row">
         <span class="portfolio-sym">${esc(i.symbol)}</span>
-        <span class="portfolio-val">$${(i.valueUsd ?? 0).toFixed(2)}</span>
+        <span class="portfolio-val">${fmtUsd(i.valueUsd ?? 0)}</span>
       </div>`,
-    ).join("") || `<div class="portfolio-row"><span class="portfolio-sym">No tokens found</span></div>`;
+    ).join("") || `<div class="portfolio-row"><span class="portfolio-empty">No tokens found</span></div>`;
 
-    total.innerHTML = `
-      <span class="stat-key">Total</span>
-      <span class="stat-val">$${totalUsd.toFixed(2)}</span>`;
+    total.textContent = fmtUsd(totalUsd);
   } catch {
-    list.innerHTML = `<div class="portfolio-row"><span class="portfolio-sym">—</span></div>`;
-    sep.style.display = "none";
     section.style.display = "none";
   }
 }
@@ -79,7 +74,7 @@ function init(): void {
 
   function renderStatus(on: boolean): void {
     dot.className = "status-dot" + (on ? "" : " paused");
-    statusTx.textContent = on ? "ACTIVE" : "PAUSED";
+    statusTx.textContent = on ? "Watching pages" : "Paused";
     pauseBtn.textContent = on ? "Pause" : "Resume";
   }
 
@@ -101,6 +96,7 @@ function init(): void {
   jupiterToggle.addEventListener("click", async () => {
     const next = !jupiterToggle.classList.contains("on");
     jupiterToggle.classList.toggle("on", next);
+    jupiterToggle.setAttribute("aria-checked", String(next));
     try {
       const cur = await sendBg<SkillSettings>({ type: "get_skill_settings" });
       await sendBg({ type: "set_skill_settings", settings: { ...cur, trade: next } });
@@ -118,23 +114,22 @@ function init(): void {
   // (Phantom, Solflare, email, WalletConnect). The page posts back via postMessage
   // → content script → background → chrome.storage.local. The storage watcher
   // below picks up the result when the connect tab closes.
-  const connectBtn = document.getElementById("connect-btn") as HTMLButtonElement;
+  const connectBtn    = document.getElementById("connect-btn") as HTMLButtonElement;
+  const walletRow     = document.getElementById("wallet-row") as HTMLElement;
+  const walletAddr    = document.getElementById("wallet-addr") as HTMLElement;
+  const walletKind    = document.getElementById("wallet-kind") as HTMLElement;
+  const disconnectBtn = document.getElementById("disconnect-btn") as HTMLButtonElement;
   let currentWallet: WalletState = { address: null, adapter: null, connected: false };
 
   function renderConnectBtn(w: WalletState): void {
     currentWallet = w;
-    if (w.connected && w.address) {
-      const short = `${w.address.slice(0, 6)}…${w.address.slice(-4)}`;
-      const label = w.adapter === "reown" ? "email/wc" : "phantom";
-      connectBtn.textContent = `${short} [${label}]`;
-      connectBtn.title = `${w.address}\nClick to disconnect`;
-      connectBtn.classList.add("connected");
-      connectBtn.disabled = false;
-    } else {
-      connectBtn.textContent = "Connect Wallet";
-      connectBtn.title = "";
-      connectBtn.classList.remove("connected");
-      connectBtn.disabled = false;
+    const connected = Boolean(w.connected && w.address);
+    connectBtn.hidden = connected;
+    walletRow.hidden = !connected;
+    if (connected && w.address) {
+      walletAddr.textContent = `${w.address.slice(0, 6)}…${w.address.slice(-4)}`;
+      walletAddr.title = w.address;
+      walletKind.textContent = w.adapter === "reown" ? "Email wallet" : "Browser wallet";
     }
   }
 
@@ -146,16 +141,20 @@ function init(): void {
     loadPortfolio(w);
   });
 
+  disconnectBtn.addEventListener("click", () => {
+    const w: WalletState = { address: null, adapter: null, connected: false };
+    chrome.storage.local.set({ wallet: w });
+    sendBg({ type: "set_wallet", wallet: w }).catch(() => {});
+    // Email-wallet session lives on the hosted page's origin — wipe it there too.
+    if (currentWallet.adapter === "reown") sendBg({ type: "connect_wallet_reown", logout: true }).catch(() => {});
+    window.close();
+  });
+
+  // One button: opens the hosted connect page which handles all wallet types
+  // (Phantom, Solflare, email, WalletConnect). The page posts back via postMessage
+  // → content script → background → chrome.storage.local. The storage watcher
+  // above picks up the result when the connect tab closes.
   connectBtn.addEventListener("click", () => {
-    if (currentWallet.connected) {
-      const w: WalletState = { address: null, adapter: null, connected: false };
-      chrome.storage.local.set({ wallet: w });
-      sendBg({ type: "set_wallet", wallet: w }).catch(() => {});
-      // Email-wallet session lives on the hosted page's origin — wipe it there too.
-      if (currentWallet.adapter === "reown") sendBg({ type: "connect_wallet_reown", logout: true }).catch(() => {});
-      window.close();
-      return;
-    }
     sendBg({ type: "connect_wallet_reown" }).catch(() => {});
     window.close();
   });

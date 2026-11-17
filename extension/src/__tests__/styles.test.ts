@@ -5,9 +5,9 @@ describe("DS tokens", () => {
   it("has all required tokens", () => {
     expect(DS.bg).toBe("#181818");
     expect(DS.yellow).toBe("#f5e642");
-    expect(DS.safe).toBe("#8bf542");
-    expect(DS.caution).toBe("#f5c842");
-    expect(DS.danger).toBe("#f54242");
+    expect(DS.safe).toBe("#4cc38a");
+    expect(DS.caution).toBe("#f59a3c");
+    expect(DS.danger).toBe("#e5484d");
   });
 });
 
@@ -21,23 +21,23 @@ describe("brutal()", () => {
   });
 
   it("accepts a custom background color", () => {
-    expect(brutal("#8bf542")).toContain("background:#8bf542");
+    expect(brutal("#4cc38a")).toContain("background:#4cc38a");
   });
 });
 
 describe("safetyColor()", () => {
   it("returns safe color for score >= 80", () => {
-    expect(safetyColor(80)).toBe("#8bf542");
-    expect(safetyColor(95)).toBe("#8bf542");
+    expect(safetyColor(80)).toBe("#4cc38a");
+    expect(safetyColor(95)).toBe("#4cc38a");
   });
 
   it("returns caution color for score 50-79", () => {
-    expect(safetyColor(50)).toBe("#f5c842");
-    expect(safetyColor(75)).toBe("#f5c842");
+    expect(safetyColor(50)).toBe("#f59a3c");
+    expect(safetyColor(75)).toBe("#f59a3c");
   });
 
   it("returns danger color for score < 50", () => {
-    expect(safetyColor(49)).toBe("#f54242");
-    expect(safetyColor(0)).toBe("#f54242");
+    expect(safetyColor(49)).toBe("#e5484d");
+    expect(safetyColor(0)).toBe("#e5484d");
   });
 });
