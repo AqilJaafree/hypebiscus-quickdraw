@@ -682,7 +682,7 @@ async function handleMessage(
       } catch { /* storage unavailable — fall through to live fetch */ }
 
       const resp = await fetch(
-        `${WORKER_URL}/defi/helius/portfolio?wallet=${encodeURIComponent(walletState.address)}`,
+        `${WORKER_URL}/defi/portfolio?wallet=${encodeURIComponent(walletState.address)}`,
         {
           headers: {
             "X-Quickdraw-Client": "extension",
