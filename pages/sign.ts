@@ -15,6 +15,7 @@
 import { createAppKit } from "@reown/appkit";
 import { SolanaAdapter } from "@reown/appkit-adapter-solana";
 import { solana } from "@reown/appkit/networks";
+import { installEmailGuard } from "./email-guard";
 import { VersionedTransaction } from "@solana/web3.js";
 
 declare const __REOWN_PROJECT_ID__: string;
@@ -106,7 +107,7 @@ function waitForAddress(modal: Modal, ms: number): Promise<string | null> {
 }
 
 function createModal(): Modal {
-  return createAppKit({
+  const modal = createAppKit({
     adapters: [new SolanaAdapter()],
     networks: [solana],
     projectId: PROJECT_ID,
@@ -125,6 +126,8 @@ function createModal(): Modal {
     themeMode: "dark",
     themeVariables: { "--w3m-accent": "#f5e642", "--w3m-border-radius-master": "0px" },
   });
+  installEmailGuard();
+  return modal;
 }
 
 /** Resolve once the wallet connected to Quickdraw is logged in on this page. */

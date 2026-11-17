@@ -1,6 +1,7 @@
 import { createAppKit } from "@reown/appkit";
 import { SolanaAdapter } from "@reown/appkit-adapter-solana";
 import { solana } from "@reown/appkit/networks";
+import { installEmailGuard } from "./email-guard";
 
 declare const __REOWN_PROJECT_ID__: string;
 const PROJECT_ID = __REOWN_PROJECT_ID__;
@@ -86,6 +87,7 @@ async function main(): Promise<void> {
       "--w3m-border-radius-master": "0px",
     },
   });
+  installEmailGuard();
 
   if (logout) {
     await modal.disconnect().catch(() => {});
