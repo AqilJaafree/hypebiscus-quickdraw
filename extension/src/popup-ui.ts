@@ -78,6 +78,7 @@ export function createPopup(opts: PopupOptions): PopupController {
 
   host.style.pointerEvents = "auto";
   const controller = new PopupController(shadow, host, opts);
+  controller.attachPlacement();
   shadow.getElementById("qd-alert")?.addEventListener("click", () => controller.showAlertPanel());
   shadow.getElementById("qd-watch")?.addEventListener("click", () => void controller.toggleWatch());
   void controller.loadWatchState();
@@ -101,9 +102,79 @@ export class PopupController {
     private opts: PopupOptions,
   ) {}
 
+  /** Set once the user drags the popup: auto-placement stops, viewport clamping stays. */
+  private dragged = false;
+
   updatePosition(x: number, y: number): void {
-    this.host.style.left = `${x}px`;
-    this.host.style.top = `${y}px`;
+    this.opts.x = x;
+    this.opts.y = y;
+    this.place();
+  }
+
+  /** Keep the popup on screen as its content grows, and let the header drag it. */
+  attachPlacement(): void {
+    const box = this.shadow.querySelector<HTMLElement>(".popup");
+    if (!box) return;
+    this.place();
+    new ResizeObserver(() => this.place()).observe(box);
+    window.addEventListener("resize", this.onResize);
+
+    const header = this.shadow.getElementById("qd-header");
+    header?.addEventListener("pointerdown", (e) => {
+      if (e.button !== 0 || (e.target as Element).closest("button")) return;
+      e.preventDefault();
+      header.setPointerCapture(e.pointerId);
+      const r = this.host.getBoundingClientRect();
+      const dx = e.clientX - r.left, dy = e.clientY - r.top;
+      header.classList.add("dragging");
+      const move = (ev: PointerEvent): void => {
+        this.dragged = true;
+        this.setClamped(ev.clientX - dx, ev.clientY - dy);
+      };
+      const up = (): void => {
+        header.classList.remove("dragging");
+        header.removeEventListener("pointermove", move);
+        header.removeEventListener("pointerup", up);
+        header.removeEventListener("pointercancel", up);
+      };
+      header.addEventListener("pointermove", move);
+      header.addEventListener("pointerup", up);
+      header.addEventListener("pointercancel", up);
+    });
+  }
+
+  private onResize = (): void => {
+    if (!this.host.isConnected) { window.removeEventListener("resize", this.onResize); return; }
+    this.place();
+  };
+
+  /** Below the anchor if it fits, else above, else as high as the viewport allows. */
+  private place(): void {
+    if (!this.host.isConnected) return;
+    if (this.dragged) {
+      const r = this.host.getBoundingClientRect();
+      this.setClamped(r.left, r.top);
+      return;
+    }
+    const M = 8;
+    const { offsetWidth: w, offsetHeight: h } = this.host;
+    const vw = window.innerWidth, vh = window.innerHeight;
+    const ax = this.opts.x, ay = this.opts.y;
+    const x = ax + 16 + w <= vw - M ? ax + 16 : ax - w - M;
+    let y: number;
+    if (ay + M + h <= vh - M) y = ay + M;              // below the selection
+    else if (ay - 24 - M - h >= M) y = ay - 24 - M - h; // above the selection line
+    else y = vh - M - h;                                // as low as fits; clamp handles the rest
+    this.setClamped(x, y);
+  }
+
+  private setClamped(x: number, y: number): void {
+    const M = 8;
+    const { offsetWidth: w, offsetHeight: h } = this.host;
+    const cx = Math.min(Math.max(M, x), Math.max(M, window.innerWidth - w - M));
+    const cy = Math.min(Math.max(M, y), Math.max(M, window.innerHeight - h - M));
+    this.host.style.left = `${cx}px`;
+    this.host.style.top = `${cy}px`;
   }
 
   showToken(safety: SafetyScore, price: TokenPrice | null): void {
@@ -254,12 +325,15 @@ function buildShell(address: string): string {
   button:focus-visible { outline: 2px solid ${DS.yellow}; outline-offset: -2px; }
   svg { display: block; }
   .popup { width: 260px; background: ${DS.bg}; border: 2px solid #000; box-shadow: ${DS.shadow};
-    overflow: hidden; animation: qd-in 240ms ${DS.ease}; }
+    max-height: calc(100vh - 16px); overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain;
+    animation: qd-in 240ms ${DS.ease}; }
   @keyframes qd-in { from { opacity: 0; transform: translateY(6px); } }
 
   #qd-header { height: 64px; padding: 0 12px 0 16px; display: flex; align-items: center; gap: 12px;
     background: ${DS.raised}; color: ${DS.textMut};
+    position: sticky; top: 0; z-index: 1; cursor: grab; user-select: none; touch-action: none;
     transition: background-color 200ms ${DS.ease}, color 200ms ${DS.ease}; }
+  #qd-header.dragging { cursor: grabbing; }
   #qd-score { font-size: 32px; font-weight: 700; line-height: 32px; letter-spacing: -0.02em; min-width: 40px; }
   .header-meta { flex: 1; min-width: 0; }
   #qd-score-label { font-size: 12px; line-height: 16px; }

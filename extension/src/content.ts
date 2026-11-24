@@ -10,13 +10,6 @@ import { deriveVerdict } from "./jev-signals";
 import { DismissGuard } from "./dismissal";
 import type { JevSignals, SignalVerdict } from "./jev-signals";
 
-function clampPosition(x: number, y: number): { x: number; y: number } {
-  const POP_W = 264, POP_H = 160;
-  const cx = x + POP_W > window.innerWidth  ? x - POP_W - 8 : x + 16;
-  const cy = y + POP_H > window.innerHeight ? y - POP_H - 8 : y + 8;
-  return { x: Math.max(8, cx), y: Math.max(8, cy) };
-}
-
 // ── Detection lifecycle ────────────────────────────────────────────────────────
 let activeController: PopupController | null = null;
 let detectionEnabled = true;
@@ -99,7 +92,9 @@ async function triggerAddress(address: string, rawX: number, rawY: number, sourc
   const tweetContext = extractTweetContext(sourceEl);
   const contextText = tweetContext?.tweetText ?? extractSurroundingText(sourceEl);
 
-  const { x, y } = clampPosition(rawX, rawY);
+  // Anchor point (selection's bottom-left). The popup places itself against it
+  // using its real, measured size — see PopupController.place().
+  const x = rawX, y = rawY;
 
   let tokenData: TokenData | null = null;
 
